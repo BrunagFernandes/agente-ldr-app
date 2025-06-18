@@ -114,7 +114,6 @@ def padronizar_telefone(telefone):
     if len(apenas_digitos) == 11:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
-        # ESTA É A LINHA QUE FOI CORRIGIDA
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     else:
         return str(telefone)
@@ -142,7 +141,7 @@ if st.button("🚀 Iniciar Processamento Completo"):
         except Exception:
             st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
             st.stop()
-            
+        
         st.info("Lendo arquivos...")
         leads_df = ler_csv_flexivel(arquivo_dados)
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
@@ -159,16 +158,22 @@ if st.button("🚀 Iniciar Processamento Completo"):
             
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead['Nome_Empresa']}...")
+                
+                # 1. Qualificação Local
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue 
 
+                # 2. Qualificação com IA
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and site_url.strip() != '':
-                    if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
+                    if not site_url.startswith(('http://', 'https://')):
+                        site_url = 'https://' + site_url
+                    
                     texto_site = extrair_texto_com_selenium(site_url)
+                    
                     if texto_site:
                         analise = analisar_icp_com_ia(texto_site, criterios_icp)
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
