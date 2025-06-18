@@ -1,0 +1,10 @@
+Campo_ICP;Valor_ICP
+Nome_da_Empresa_Contratante;[INSIRA O NOME DA SUA EMPRESA AQUI]
+Site_da_Empresa_Contratante;[INSIRA O SITE COMPLETO DA SUA EMPRESA AQUI]
+Segmento_Desejado_do_Lead;"Software B2B;Tecnologia para Logística"
+Porte_da_Empresa_Desejada_do_Lead;"Média;Grande"
+Cargos_de_Interesse_do_Lead;"Diretor de TI;Gerente de Inovação;CTO;Gerente de Logística"
+Localidade_Especifica_do_Lead;"São Paulo; SP; Brasil"
+Numero_de_Funcionarios_Desejado_do_Lead;50-5000
+Observacoes_Gerais_do_Lead_Ideal;"Empresas com frota própria;Não pode ser do setor governamental"
+Limite_de_Similaridade_Concorrente;0.75
