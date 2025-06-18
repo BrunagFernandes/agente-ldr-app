@@ -106,16 +106,29 @@ def padronizar_nome_empresa(nome_empresa):
 def padronizar_telefone(telefone):
     """Formata um número de telefone para o padrão brasileiro."""
     if pd.isna(telefone): return ''
+    # Remove tudo que não for dígito
     apenas_digitos = re.sub(r'\D', '', str(telefone))
-    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'): apenas_digitos = apenas_digitos[1:]
-    if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
-    elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
-    else: return str(telefone)
+    
+    # Remove o '55' inicial se houver, comum em números internacionais
+    if len(apenas_digitos) > 11 and apenas_digitos.startswith('55'):
+        apenas_digitos = apenas_digitos[2:]
+
+    # Remove o '0' inicial se houver (comum em chamadas de celular)
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
+        apenas_digitos = apenas_digitos[1:]
+
+    # Formata baseado na quantidade de dígitos
+    if len(apenas_digitos) == 11: # Celular com 9
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10: # Fixo ou Celular sem 9
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenos_digitos[6:]}"
+    else:
+        return str(telefone) # Retorna o original se não se encaixar no padrão
 
 # -- Funções de Qualificação Local --
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
-    if pd.isna(cargo_lead) or cargo_lead.strip() == '': return False
+    if pd.isna(cargo_lead) or cargo_lead.strip() == '' or pd.isna(cargos_icp_str): return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
     return cargo_lead.strip().lower() in cargos_de_interesse
 
@@ -138,34 +151,32 @@ if st.button("🚀 Iniciar Processamento Completo"):
             st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
             st.stop()
             
-        st.info("Lendo arquivos...")
+        st.info("Lendo arquivos com leitor flexível...")
         leads_df = ler_csv_flexivel(arquivo_dados)
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
             criterios_icp = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             
-            # Criar colunas de resultado
             leads_df['classificacao_icp'] = 'Aguardando Análise'
             leads_df['motivo_classificacao'] = ''
 
             st.info("Iniciando processamento... Isso pode levar alguns minutos.")
             progress_bar = st.progress(0)
+            status_text = st.empty() # CRIAMOS O ESPAÇO PARA O TEXTO DE STATUS
             
-            # Loop de Qualificação e Enriquecimento
             for index, lead in leads_df.iterrows():
-                # 1. Qualificação Local (Rápida)
+                status_text.text(f"Analisando: {lead['Nome_Empresa']}...") # ATUALIZAMOS O TEXTO DE STATUS
+
+                # 1. Qualificação Local
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
-                    continue # Pula para o próximo lead
-                
-                # (Adicionar aqui outras verificações locais como nº de funcionários e localidade)
+                    progress_bar.progress((index + 1) / len(leads_df))
+                    continue 
 
-                # 2. Qualificação com IA (Apenas para quem passou nos filtros locais)
-                st.write(f"Analisando com IA: {lead['Nome_Empresa']}...")
+                # 2. Qualificação com IA
                 site_url = lead.get('Site_Original')
-                
                 if pd.notna(site_url) and site_url.strip() != '':
                     if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
                     
@@ -181,26 +192,27 @@ if st.button("🚀 Iniciar Processamento Completo"):
                             leads_df.at[index, 'motivo_classificacao'] = f"Concorrente: {analise.get('is_concorrente')}. Motivo: {analise.get('motivo_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto. Motivo: {analise.get('motivo_segmento')}"
                     else:
                         leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                        leads_df.at[index, 'motivo_classificacao'] = 'Site não acessível ou sem texto para análise'
+                        leads_df.at[index, 'motivo_classificacao'] = 'Site não acessível ou sem texto'
                 else:
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
                     leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
                 
                 progress_bar.progress((index + 1) / len(leads_df))
             
-            st.success("Análise de qualificação concluída!")
-            st.info("Iniciando padronização final dos dados...")
+            status_text.text("Análise de qualificação concluída!")
+            time.sleep(1) # Pequena pausa para o usuário ver a mensagem
+            
+            status_text.info("Iniciando padronização final dos dados...")
+            time.sleep(1)
 
-            # Loop de Padronização (Aplica a todos)
-            leads_df['nome_completo_padronizado'] = leads_df.apply(padronizar_nome_contato, axis=1)
+            # Aplica a Padronização Final
+            leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row), axis=1)
             leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
             leads_df['telefone_padronizado'] = leads_df['Telefone_Original'].apply(padronizar_telefone)
-            # (Adicionar aqui outras colunas a serem padronizadas)
-
-            st.success("Processamento completo!")
+            
+            status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
-            # Botão de Download
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
                 label="⬇️ Baixar resultado completo (.csv)",
