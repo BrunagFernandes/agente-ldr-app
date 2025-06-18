@@ -1,0 +1,7 @@
+streamlit
+pandas
+selenium
+beautifulsoup4
+scikit-learn
+nltk
+google-generativeai
