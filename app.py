@@ -106,24 +106,18 @@ def padronizar_nome_empresa(nome_empresa):
 def padronizar_telefone(telefone):
     """Formata um número de telefone para o padrão brasileiro."""
     if pd.isna(telefone): return ''
-    # Remove tudo que não for dígito
     apenas_digitos = re.sub(r'\D', '', str(telefone))
-    
-    # Remove o '55' inicial se houver, comum em números internacionais
     if len(apenas_digitos) > 11 and apenas_digitos.startswith('55'):
         apenas_digitos = apenas_digitos[2:]
-
-    # Remove o '0' inicial se houver (comum em chamadas de celular)
     if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
         apenas_digitos = apenas_digitos[1:]
-
-    # Formata baseado na quantidade de dígitos
-    if len(apenas_digitos) == 11: # Celular com 9
+    if len(apenas_digitos) == 11:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
-    elif len(apenas_digitos) == 10: # Fixo ou Celular sem 9
-        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenos_digitos[6:]}"
+    elif len(apenas_digitos) == 10:
+        # ESTA É A LINHA QUE FOI CORRIGIDA
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     else:
-        return str(telefone) # Retorna o original se não se encaixar no padrão
+        return str(telefone)
 
 # -- Funções de Qualificação Local --
 def verificar_cargo(cargo_lead, cargos_icp_str):
@@ -138,20 +132,18 @@ st.set_page_config(layout="wide", page_title="Agente LDR de IA")
 st.title("🤖 Agente LDR com Inteligência Artificial")
 st.write("Faça o upload dos seus arquivos para qualificação, enriquecimento e padronização de leads.")
 
-# Interface de Upload
 arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
 arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
 
 if st.button("🚀 Iniciar Processamento Completo"):
     if arquivo_dados and arquivo_icp:
-        # Configurar a API Key
         try:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
         except Exception:
             st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
             st.stop()
             
-        st.info("Lendo arquivos com leitor flexível...")
+        st.info("Lendo arquivos...")
         leads_df = ler_csv_flexivel(arquivo_dados)
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
@@ -163,25 +155,20 @@ if st.button("🚀 Iniciar Processamento Completo"):
 
             st.info("Iniciando processamento... Isso pode levar alguns minutos.")
             progress_bar = st.progress(0)
-            status_text = st.empty() # CRIAMOS O ESPAÇO PARA O TEXTO DE STATUS
+            status_text = st.empty()
             
             for index, lead in leads_df.iterrows():
-                status_text.text(f"Analisando: {lead['Nome_Empresa']}...") # ATUALIZAMOS O TEXTO DE STATUS
-
-                # 1. Qualificação Local
+                status_text.text(f"Analisando: {lead['Nome_Empresa']}...")
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue 
 
-                # 2. Qualificação com IA
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and site_url.strip() != '':
                     if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
-                    
                     texto_site = extrair_texto_com_selenium(site_url)
-                    
                     if texto_site:
                         analise = analisar_icp_com_ia(texto_site, criterios_icp)
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
@@ -200,12 +187,11 @@ if st.button("🚀 Iniciar Processamento Completo"):
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.text("Análise de qualificação concluída!")
-            time.sleep(1) # Pequena pausa para o usuário ver a mensagem
+            time.sleep(1)
             
             status_text.info("Iniciando padronização final dos dados...")
             time.sleep(1)
 
-            # Aplica a Padronização Final
             leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row), axis=1)
             leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
             leads_df['telefone_padronizado'] = leads_df['Telefone_Original'].apply(padronizar_telefone)
