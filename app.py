@@ -19,7 +19,30 @@ import google.generativeai as genai
 
 # --- FASE 2: FUNÇÕES DO AGENTE (NOSSO "MOTOR") ---
 
-# Esta função de limpeza será usada pela função de extração de texto
+def ler_csv_flexivel(arquivo_upado):
+    """
+    Lê um arquivo CSV que foi upado, tentando detectar automaticamente
+    se o separador é ponto e vírgula ou vírgula.
+    """
+    try:
+        # Volta ao início do arquivo para garantir que a leitura comece do zero
+        arquivo_upado.seek(0)
+        # Tenta ler com ponto e vírgula primeiro, nosso padrão ideal
+        df = pd.read_csv(arquivo_upado, sep=';')
+        
+        # Se, após a leitura, o dataframe tiver apenas uma coluna, é um forte indício
+        # de que o separador estava errado.
+        if df.shape[1] == 1:
+            # Volta ao início do arquivo novamente para uma nova tentativa
+            arquivo_upado.seek(0)
+            # Tenta ler com vírgula
+            df = pd.read_csv(arquivo_upado, sep=',')
+            
+        return df
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo CSV: {e}")
+        return None
+
 def limpar_texto(texto):
     """Converte para minúsculas, remove pontuação e palavras comuns."""
     nltk.download('punkt', quiet=True)
@@ -31,9 +54,9 @@ def limpar_texto(texto):
     palavras_filtradas = [palavra for palavra in tokens if palavra not in stop_words]
     return " ".join(palavras_filtradas)
 
-# Função para extrair texto de um site usando Selenium
 def extrair_texto_com_selenium(url):
     """Usa Selenium para acessar um site, clicar no banner de cookies e extrair todo o texto."""
+    # Nota: A instalação do Selenium e ChromeDriver é feita no requirements.txt para o Streamlit Cloud
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
@@ -52,7 +75,7 @@ def extrair_texto_com_selenium(url):
             botao_aceitar.click()
             time.sleep(2)
         except TimeoutException:
-            pass # Se não encontrar o botão, apenas continua
+            pass
         
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -61,13 +84,18 @@ def extrair_texto_com_selenium(url):
         if driver:
             driver.quit()
 
-# Função principal de análise com a IA
-def analisar_icp_com_ia(texto_do_site, criterios_icp):
-    """Envia o texto e os critérios para a IA e retorna a análise."""
-    prompt = f"""
-    Você é um Analista de Desenvolvimento de Leads Sênior. Analise o 'Texto do Site do Lead' com base nos 'Critérios do Cliente Ideal (ICP)'.
+# Cole esta função no lugar da antiga
 
-    **Critérios do ICP:**
+def analisar_icp_com_ia(texto_do_site, criterios_icp):
+    """
+    Envia o texto de um site e os critérios do ICP para a IA do Google
+    e retorna uma análise estruturada em formato de dicionário.
+    """
+    prompt = f"""
+    Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o texto de um site de uma empresa (LEAD)
+    e compará-lo com os Critérios do Cliente Ideal (ICP) da minha empresa.
+
+    **Critérios do ICP da Minha Empresa:**
     - Segmento Desejado: {criterios_icp.get('Segmento_Desejado_do_Lead', 'N/A')}
     - Site da Minha Empresa (para análise de concorrente): {criterios_icp.get('Site_da_Empresa_Contratante', 'N/A')}
     - Observações e Palavras-chave: {criterios_icp.get('Observacoes_Gerais_do_Lead_Ideal', 'N/A')}
@@ -77,82 +105,20 @@ def analisar_icp_com_ia(texto_do_site, criterios_icp):
     {texto_do_site[:4000]}
     ---
 
-    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente" (boolean), "motivo_concorrente" (string), "is_segmento_correto" (boolean), "motivo_segmento" (string).
+    **Sua Resposta (Obrigatório):**
+    Responda APENAS com um objeto JSON válido, contendo as seguintes chaves:
+    - "is_concorrente": coloque true se o lead for um concorrente direto da minha empresa, senão false.
+    - "motivo_concorrente": explique em uma frase curta por que você considera (ou não) um concorrente.
+    - "is_segmento_correto": coloque true se o lead pertence ao segmento desejado, senão false.
+    - "motivo_segmento": explique em uma frase curta por que o segmento se encaixa (ou não).
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
-        resposta_json = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(resposta_json)
-    except Exception:
-        return {"error": "Falha na análise da IA"}
-
-# --- FASE 3: INTERFACE DO APLICATIVO (STREAMLIT) ---
-
-st.set_page_config(layout="wide", page_title="Agente LDR de IA")
-
-st.title("🤖 Agente LDR com Inteligência Artificial")
-st.write("Faça o upload dos seus arquivos para iniciar a qualificação, enriquecimento e análise de leads.")
-
-# Colunas para os uploads
-col1, col2 = st.columns(2)
-
-with col1:
-    arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
-
-with col2:
-    arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
-
-if st.button("🚀 Iniciar Processamento Completo"):
-    if arquivo_dados and arquivo_icp:
-        # Configurar a API Key (deve ser adicionada como um segredo no Streamlit)
-        try:
-            genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        except Exception:
-            st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
-            st.stop()
-            
-        st.info("Lendo e preparando os arquivos...")
-        leads_df = pd.read_csv(arquivo_dados, sep=';')
-        icp_raw_df = pd.read_csv(arquivo_icp, sep=';')
-        criterios_icp = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
-        
-        # Criar colunas para os resultados
-        leads_df['classificacao_ia'] = ''
-        leads_df['motivo_analise'] = ''
-
-        st.info("Iniciando análise com IA. Isso pode levar alguns minutos...")
-        progress_bar = st.progress(0)
-        
-        # Loop para analisar cada lead
-        for index, lead in leads_df.iterrows():
-            st.write(f"Analisando: {lead['Nome_Empresa']}...")
-            site_url = lead.get('Site_Original')
-            
-            if pd.notna(site_url) and site_url.strip() != '':
-                texto_site = extrair_texto_com_selenium(f"https://{site_url}")
-                if texto_site:
-                    analise = analisar_icp_com_ia(texto_site, criterios_icp)
-                    # Aqui você preencheria as colunas do seu dataframe com a resposta da IA
-                    leads_df.at[index, 'classificacao_ia'] = f"Segmento Correto: {analise.get('is_segmento_correto')}, Concorrente: {analise.get('is_concorrente')}"
-                    leads_df.at[index, 'motivo_analise'] = f"Segmento: {analise.get('motivo_segmento')} | Concorrência: {analise.get('motivo_concorrente')}"
-                else:
-                    leads_df.at[index, 'classificacao_ia'] = "Site não acessível ou sem texto"
-            else:
-                leads_df.at[index, 'classificacao_ia'] = "Site não informado"
-            
-            progress_bar.progress((index + 1) / len(leads_df))
-
-        st.success("Análise com IA concluída com sucesso!")
-        st.dataframe(leads_df)
-        
-        # Botão de Download
-        csv = leads_df.to_csv(sep=';', index=False).encode('utf-8')
-        st.download_button(
-            label="⬇️ Baixar resultado (.csv)",
-            data=csv,
-            file_name='leads_analisados_com_ia.csv',
-            mime='text/csv',
-        )
-    else:
-        st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
+        # Limpa a resposta para garantir que seja um JSON válido
+        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(resposta_texto)
+    except Exception as e:
+        # Se algo der errado (na chamada da IA ou na conversão do JSON), retorna um erro
+        print(f"Ocorreu um erro na chamada ou processamento da IA: {e}")
+        return {"error": "Falha na análise da IA", "details": str(e)}
