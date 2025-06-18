@@ -17,46 +17,24 @@ from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 
-# --- FASE 2: FUNÇÕES DO AGENTE (NOSSO "MOTOR") ---
+# --- FASE 2: DEFINIÇÃO DE TODAS AS FUNÇÕES DO AGENTE ---
 
+# -- Funções de Leitura e Análise --
 def ler_csv_flexivel(arquivo_upado):
-    """
-    Lê um arquivo CSV que foi upado, tentando detectar automaticamente
-    se o separador é ponto e vírgula ou vírgula.
-    """
+    """Lê um arquivo CSV com separador flexível (ponto e vírgula ou vírgula)."""
     try:
-        # Volta ao início do arquivo para garantir que a leitura comece do zero
         arquivo_upado.seek(0)
-        # Tenta ler com ponto e vírgula primeiro, nosso padrão ideal
-        df = pd.read_csv(arquivo_upado, sep=';')
-        
-        # Se, após a leitura, o dataframe tiver apenas uma coluna, é um forte indício
-        # de que o separador estava errado.
+        df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8')
         if df.shape[1] == 1:
-            # Volta ao início do arquivo novamente para uma nova tentativa
             arquivo_upado.seek(0)
-            # Tenta ler com vírgula
-            df = pd.read_csv(arquivo_upado, sep=',')
-            
+            df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8')
         return df
     except Exception as e:
         st.error(f"Erro ao ler o arquivo CSV: {e}")
         return None
 
-def limpar_texto(texto):
-    """Converte para minúsculas, remove pontuação e palavras comuns."""
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    texto = texto.lower()
-    texto = re.sub(r'[^a-zA-Z\s]', '', texto)
-    tokens = word_tokenize(texto)
-    stop_words = set(stopwords.words('portuguese'))
-    palavras_filtradas = [palavra for palavra in tokens if palavra not in stop_words]
-    return " ".join(palavras_filtradas)
-
 def extrair_texto_com_selenium(url):
-    """Usa Selenium para acessar um site, clicar no banner de cookies e extrair todo o texto."""
-    # Nota: A instalação do Selenium e ChromeDriver é feita no requirements.txt para o Streamlit Cloud
+    """Usa Selenium para acessar um site, clicar no banner de cookies e extrair o texto."""
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
@@ -84,41 +62,151 @@ def extrair_texto_com_selenium(url):
         if driver:
             driver.quit()
 
-# Cole esta função no lugar da antiga
-
 def analisar_icp_com_ia(texto_do_site, criterios_icp):
-    """
-    Envia o texto de um site e os critérios do ICP para a IA do Google
-    e retorna uma análise estruturada em formato de dicionário.
-    """
+    """Envia o texto e os critérios para a IA e retorna a análise."""
     prompt = f"""
-    Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o texto de um site de uma empresa (LEAD)
-    e compará-lo com os Critérios do Cliente Ideal (ICP) da minha empresa.
+    Você é um Analista de Desenvolvimento de Leads Sênior. Analise o 'Texto do Site do Lead' com base nos 'Critérios do Cliente Ideal (ICP)'.
 
-    **Critérios do ICP da Minha Empresa:**
+    **Critérios do ICP:**
     - Segmento Desejado: {criterios_icp.get('Segmento_Desejado_do_Lead', 'N/A')}
     - Site da Minha Empresa (para análise de concorrente): {criterios_icp.get('Site_da_Empresa_Contratante', 'N/A')}
-    - Observações e Palavras-chave: {criterios_icp.get('Observacoes_Gerais_do_Lead_Ideal', 'N/A')}
 
     **Texto do Site do Lead para Análise:**
     ---
     {texto_do_site[:4000]}
     ---
 
-    **Sua Resposta (Obrigatório):**
-    Responda APENAS com um objeto JSON válido, contendo as seguintes chaves:
-    - "is_concorrente": coloque true se o lead for um concorrente direto da minha empresa, senão false.
-    - "motivo_concorrente": explique em uma frase curta por que você considera (ou não) um concorrente.
-    - "is_segmento_correto": coloque true se o lead pertence ao segmento desejado, senão false.
-    - "motivo_segmento": explique em uma frase curta por que o segmento se encaixa (ou não).
+    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente" (boolean), "motivo_concorrente" (string), "is_segmento_correto" (boolean), "motivo_segmento" (string).
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
-        # Limpa a resposta para garantir que seja um JSON válido
-        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(resposta_texto)
+        resposta_json = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(resposta_json)
     except Exception as e:
-        # Se algo der errado (na chamada da IA ou na conversão do JSON), retorna um erro
-        print(f"Ocorreu um erro na chamada ou processamento da IA: {e}")
         return {"error": "Falha na análise da IA", "details": str(e)}
+
+# -- Funções de Padronização e Edição --
+def padronizar_nome_contato(row):
+    """Cria um nome completo padronizado."""
+    nome = row.get('Nome_Lead', '')
+    sobrenome = row.get('Sobrenome_Lead', '')
+    if pd.isna(nome) or nome.strip() == '': return ''
+    nome_completo = f"{nome} {sobrenome}".strip()
+    return nome_completo.title()
+
+def padronizar_nome_empresa(nome_empresa):
+    """Remove siglas societárias e padroniza o nome da empresa."""
+    if pd.isna(nome_empresa): return ''
+    siglas = [r'\sS/A', r'\sS\.A', r'\sSA', r'\sLTDA', r'\sLtda', r'\sME', r'\sEIRELI', r'\sEPP', r'\sMEI']
+    for sigla in siglas:
+        nome_empresa = re.sub(sigla, '', nome_empresa, flags=re.IGNORECASE)
+    return nome_empresa.strip().title()
+
+def padronizar_telefone(telefone):
+    """Formata um número de telefone para o padrão brasileiro."""
+    if pd.isna(telefone): return ''
+    apenas_digitos = re.sub(r'\D', '', str(telefone))
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'): apenas_digitos = apenas_digitos[1:]
+    if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+    else: return str(telefone)
+
+# -- Funções de Qualificação Local --
+def verificar_cargo(cargo_lead, cargos_icp_str):
+    """Verifica se o cargo do lead está na lista de interesse do ICP."""
+    if pd.isna(cargo_lead) or cargo_lead.strip() == '': return False
+    cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
+    return cargo_lead.strip().lower() in cargos_de_interesse
+
+# --- FASE 3: INTERFACE DO APLICATIVO (STREAMLIT) ---
+
+st.set_page_config(layout="wide", page_title="Agente LDR de IA")
+st.title("🤖 Agente LDR com Inteligência Artificial")
+st.write("Faça o upload dos seus arquivos para qualificação, enriquecimento e padronização de leads.")
+
+# Interface de Upload
+arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
+arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
+
+if st.button("🚀 Iniciar Processamento Completo"):
+    if arquivo_dados and arquivo_icp:
+        # Configurar a API Key
+        try:
+            genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+        except Exception:
+            st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
+            st.stop()
+            
+        st.info("Lendo arquivos...")
+        leads_df = ler_csv_flexivel(arquivo_dados)
+        icp_raw_df = ler_csv_flexivel(arquivo_icp)
+
+        if leads_df is not None and icp_raw_df is not None:
+            criterios_icp = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
+            
+            # Criar colunas de resultado
+            leads_df['classificacao_icp'] = 'Aguardando Análise'
+            leads_df['motivo_classificacao'] = ''
+
+            st.info("Iniciando processamento... Isso pode levar alguns minutos.")
+            progress_bar = st.progress(0)
+            
+            # Loop de Qualificação e Enriquecimento
+            for index, lead in leads_df.iterrows():
+                # 1. Qualificação Local (Rápida)
+                if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
+                    continue # Pula para o próximo lead
+                
+                # (Adicionar aqui outras verificações locais como nº de funcionários e localidade)
+
+                # 2. Qualificação com IA (Apenas para quem passou nos filtros locais)
+                st.write(f"Analisando com IA: {lead['Nome_Empresa']}...")
+                site_url = lead.get('Site_Original')
+                
+                if pd.notna(site_url) and site_url.strip() != '':
+                    if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
+                    
+                    texto_site = extrair_texto_com_selenium(site_url)
+                    
+                    if texto_site:
+                        analise = analisar_icp_com_ia(texto_site, criterios_icp)
+                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                            leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                        else:
+                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                            leads_df.at[index, 'motivo_classificacao'] = f"Concorrente: {analise.get('is_concorrente')}. Motivo: {analise.get('motivo_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto. Motivo: {analise.get('motivo_segmento')}"
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
+                        leads_df.at[index, 'motivo_classificacao'] = 'Site não acessível ou sem texto para análise'
+                else:
+                    leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
+                
+                progress_bar.progress((index + 1) / len(leads_df))
+            
+            st.success("Análise de qualificação concluída!")
+            st.info("Iniciando padronização final dos dados...")
+
+            # Loop de Padronização (Aplica a todos)
+            leads_df['nome_completo_padronizado'] = leads_df.apply(padronizar_nome_contato, axis=1)
+            leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
+            leads_df['telefone_padronizado'] = leads_df['Telefone_Original'].apply(padronizar_telefone)
+            # (Adicionar aqui outras colunas a serem padronizadas)
+
+            st.success("Processamento completo!")
+            st.dataframe(leads_df)
+            
+            # Botão de Download
+            csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(
+                label="⬇️ Baixar resultado completo (.csv)",
+                data=csv,
+                file_name='leads_processados_final.csv',
+                mime='text/csv',
+            )
+    else:
+        st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
