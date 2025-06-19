@@ -63,27 +63,38 @@ def extrair_texto_com_selenium(url):
             driver.quit()
 
 def analisar_icp_com_ia(texto_do_site, criterios_icp):
-    """Envia o texto e os critérios para a IA e retorna a análise."""
+    """
+    Envia o texto de um site e os critérios do ICP para a IA do Google e retorna uma análise
+    estruturada, usando a lista de segmentos do ICP para qualificar e categorizar.
+    """
     prompt = f"""
-    Você é um Analista de Desenvolvimento de Leads Sênior. Analise o 'Texto do Site do Lead' com base nos 'Critérios do Cliente Ideal (ICP)'.
+    Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o 'Texto do Site do Lead'
+    e compará-lo com os 'Critérios do Cliente Ideal (ICP)' da minha empresa.
 
-    **Critérios do ICP:**
-    - Segmento Desejado: {criterios_icp.get('Segmento_Desejado_do_Lead', 'N/A')}
+    **Critérios do ICP da Minha Empresa:**
     - Site da Minha Empresa (para análise de concorrente): {criterios_icp.get('Site_da_Empresa_Contratante', 'N/A')}
+    - Segmentos Válidos (use esta lista para qualificar e categorizar): [{criterios_icp.get('Segmento_Desejado_do_Lead', 'N/A')}]
 
     **Texto do Site do Lead para Análise:**
     ---
-    {texto_do_site[:4000]}
+    {texto_do_site[:6000]}
     ---
 
-    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente" (boolean), "motivo_concorrente" (string), "is_segmento_correto" (boolean), "motivo_segmento" (string).
+    **Sua Resposta (Obrigatório):**
+    Responda APENAS com um objeto JSON válido, contendo as seguintes chaves:
+    - "is_concorrente": coloque true se o lead for um concorrente direto da minha empresa, senão false.
+    - "motivo_concorrente": explique em uma frase curta por que você considera (ou não) um concorrente.
+    - "is_segmento_correto": coloque true se o lead parece pertencer a um dos 'Segmentos Válidos' listados acima, senão false.
+    - "motivo_segmento": explique em uma frase curta por que o segmento se encaixa (ou não), citando o segmento que você identificou.
+    - "categoria_segmento": se "is_segmento_correto" for true, retorne EXATAMENTE qual dos 'Segmentos Válidos' da lista acima melhor descreve o lead. Se nenhuma das opções da lista for adequada mas o lead ainda for do segmento geral, retorne "Outros". Se "is_segmento_correto" for false, retorne "N/A".
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
-        resposta_json = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(resposta_json)
+        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(resposta_texto)
     except Exception as e:
+        print(f"Ocorreu um erro na chamada ou processamento da IA: {e}")
         return {"error": "Falha na análise da IA", "details": str(e)}
 
 # -- Funções de Padronização e Edição --
@@ -151,6 +162,7 @@ if st.button("🚀 Iniciar Processamento Completo"):
             
             leads_df['classificacao_icp'] = 'Aguardando Análise'
             leads_df['motivo_classificacao'] = ''
+            leads_df['categoria_do_lead'] = '' # Nova coluna para a categoria
 
             st.info("Iniciando processamento... Isso pode levar alguns minutos.")
             progress_bar = st.progress(0)
@@ -159,14 +171,12 @@ if st.button("🚀 Iniciar Processamento Completo"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead['Nome_Empresa']}...")
                 
-                # 1. Qualificação Local
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue 
 
-                # 2. Qualificação com IA
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and site_url.strip() != '':
                     if not site_url.startswith(('http://', 'https://')):
@@ -176,12 +186,14 @@ if st.button("🚀 Iniciar Processamento Completo"):
                     
                     if texto_site:
                         analise = analisar_icp_com_ia(texto_site, criterios_icp)
+                        leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A') # Preenche a nova coluna
+
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
                             leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
                             leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
                         else:
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                            leads_df.at[index, 'motivo_classificacao'] = f"Concorrente: {analise.get('is_concorrente')}. Motivo: {analise.get('motivo_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto. Motivo: {analise.get('motivo_segmento')}"
+                            leads_df.at[index, 'motivo_classificacao'] = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
                     else:
                         leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
                         leads_df.at[index, 'motivo_classificacao'] = 'Site não acessível ou sem texto'
