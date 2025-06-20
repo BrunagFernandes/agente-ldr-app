@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL COM LEITURA DE MÚLTIPLAS LOCALIDADES ---
+# --- VERSÃO FINAL COM CORREÇÃO NA FUNÇÃO DE LOCALIDADE ---
 import streamlit as st
 import pandas as pd
 import io
@@ -47,11 +47,17 @@ def verificar_cargo(cargo_lead, cargos_icp_str):
     cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
     return cargo_lead.strip().lower() in cargos_de_interesse
 
-# --- NOVA FUNÇÃO DE LOCALIDADE (LÊ LISTA) ---
-def verificar_localidade(lead_row, lista_locais_permitidos_icp):
-    """Verifica se a localidade do lead corresponde a qualquer um dos locais permitidos na lista do ICP."""
+# --- FUNÇÃO DE LOCALIDADE CORRIGIDA ---
+def verificar_localidade(lead_row, locais_icp):
+    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
+    # --- NOVA LINHA DE CORREÇÃO ---
+    # Garante que sempre trabalhamos com uma lista, mesmo se o ICP tiver só um local
+    if isinstance(locais_icp, str):
+        locais_icp = [locais_icp] # Transforma o texto em uma lista com um item
+    # --- FIM DA CORREÇÃO ---
+    
     # Se a lista de locais for vazia ou conter 'brasil', aprova todos
-    if not lista_locais_permitidos_icp or any(loc.lower() == 'brasil' for loc in lista_locais_permitidos_icp):
+    if not locais_icp or any(loc.lower() == 'brasil' for loc in locais_icp):
         return True
 
     regioes = {
@@ -62,19 +68,22 @@ def verificar_localidade(lead_row, lista_locais_permitidos_icp):
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
 
+    # Prepara os dados de localidade do lead
     estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
     cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
     
     # Verifica se o lead corresponde a QUALQUER UM dos locais permitidos
-    for local_permitido in lista_locais_permitidos_icp:
+    for local_permitido in locais_icp:
         local_permitido_clean = local_permitido.lower()
         if local_permitido_clean in regioes:
-            if estado_lead in regioes[local_permitido_clean]:
-                return True
+            # Compara a sigla do estado, ex: 'sp'
+            if estado_lead in regioes[local_permitido_clean] or estado_lead in regioes[local_permitido_clean]:
+                return True 
         else:
             partes_requisito = [part.strip() for part in local_permitido_clean.split(',')]
-            match_completo = all(parte in [cidade_lead, estado_lead] for parte in partes_requisito)
-            if match_completo:
+            # Compara as partes do requisito com a cidade e o estado do lead
+            lead_data_comparable = [cidade_lead, estado_lead]
+            if all(parte in lead_data_comparable for parte in partes_requisito):
                 return True
 
     return False
@@ -100,18 +109,16 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            # --- NOVA LEITURA DE CRITÉRIOS DO ICP ---
-            # Pega todos os valores para um campo (como múltiplas localidades)
+            # Lógica para ler multiplas linhas do mesmo campo (como localidade)
             criterios_icp = {}
             for campo, grupo in icp_raw_df.groupby('Campo_ICP'):
                 valores = grupo['Valor_ICP'].tolist()
-                # Se houver apenas um valor, armazena como string. Se houver múltiplos, armazena como lista.
                 criterios_icp[str(campo).lower().strip()] = valores[0] if len(valores) == 1 else valores
 
             # (Bloco de validação do ICP permanece aqui)
             
             # Inicializa colunas de resultado
-            # ... (inicialização de colunas permanece a mesma)
+            # ... (inicialização de colunas)
 
             st.info("Iniciando processamento...")
             progress_bar = st.progress(0)
@@ -120,27 +127,28 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
                 
-                # Qualificação Local (Cargo e Localidade)
+                # 1. Qualificação Local (Cargo e Localidade)
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead')):
-                    # ... (lógica de reprovação por cargo)
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
+                    progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
-                # A chamada para verificar_localidade agora passa uma lista de locais
                 if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
-                # (O restante do loop com a chamada para a IA continua como estava)
-                # Para o exemplo, vamos apenas marcar como aprovado localmente
+                # O resto do loop para análise com IA continua aqui...
                 leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP (Local)'
                 leads_df.at[index, 'motivo_classificacao'] = 'Aprovado nos filtros de Cargo e Localidade'
                 progress_bar.progress((index + 1) / len(leads_df))
-
+            
             st.success("Processamento completo!")
             st.dataframe(leads_df)
             
-            # (Botão de download permanece o mesmo)
+            csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
     else:
         st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
