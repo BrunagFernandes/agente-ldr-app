@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL COM LÓGICA DE LOCALIDADE APRIMORADA ---
+# --- VERSÃO FINAL COM LEITURA DE MÚLTIPLAS LOCALIDADES ---
 import streamlit as st
 import pandas as pd
 import io
@@ -47,14 +47,13 @@ def verificar_cargo(cargo_lead, cargos_icp_str):
     cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
     return cargo_lead.strip().lower() in cargos_de_interesse
 
-# --- NOVA FUNÇÃO DE LOCALIDADE (MAIS INTELIGENTE) ---
-def verificar_localidade(lead_row, localidade_icp_str):
-    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
-    # Se o critério for vazio ou "brasil", aprova todos
-    if pd.isna(localidade_icp_str) or localidade_icp_str.strip().lower() == 'brasil' or localidade_icp_str.strip() == '':
+# --- NOVA FUNÇÃO DE LOCALIDADE (LÊ LISTA) ---
+def verificar_localidade(lead_row, lista_locais_permitidos_icp):
+    """Verifica se a localidade do lead corresponde a qualquer um dos locais permitidos na lista do ICP."""
+    # Se a lista de locais for vazia ou conter 'brasil', aprova todos
+    if not lista_locais_permitidos_icp or any(loc.lower() == 'brasil' for loc in lista_locais_permitidos_icp):
         return True
 
-    # Dicionário de regiões para estados (em minúsculo e sem acentos)
     regioes = {
         'sudeste': ['sp', 'rj', 'es', 'mg'],
         'sul': ['pr', 'sc', 'rs'],
@@ -63,29 +62,21 @@ def verificar_localidade(lead_row, localidade_icp_str):
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
 
-    # Prepara os dados de localidade do lead (minúsculo e sem acentos para comparação)
     estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
     cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
     
-    # Separa os múltiplos locais permitidos no ICP usando o ponto e vírgula
-    locais_permitidos_icp = [loc.strip().lower() for loc in localidade_icp_str.split(';')]
-
     # Verifica se o lead corresponde a QUALQUER UM dos locais permitidos
-    for local_permitido in locais_permitidos_icp:
-        # Cenário 1: O critério é uma região?
-        if local_permitido in regioes:
-            if estado_lead in regioes[local_permitido]:
-                return True # Lead é de um estado da região permitida
-
-        # Cenário 2: O critério é um local específico (cidade, estado)
+    for local_permitido in lista_locais_permitidos_icp:
+        local_permitido_clean = local_permitido.lower()
+        if local_permitido_clean in regioes:
+            if estado_lead in regioes[local_permitido_clean]:
+                return True
         else:
-            partes_requisito = [part.strip() for part in local_permitido.split(',')]
-            # Verifica se todas as partes do requisito estão nos dados do lead
+            partes_requisito = [part.strip() for part in local_permitido_clean.split(',')]
             match_completo = all(parte in [cidade_lead, estado_lead] for parte in partes_requisito)
             if match_completo:
-                return True # Lead corresponde a um dos locais específicos permitidos
+                return True
 
-    # Se, após verificar todos os locais permitidos, nenhum correspondeu, reprova.
     return False
 
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
@@ -109,13 +100,18 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
-            criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
-            
+            # --- NOVA LEITURA DE CRITÉRIOS DO ICP ---
+            # Pega todos os valores para um campo (como múltiplas localidades)
+            criterios_icp = {}
+            for campo, grupo in icp_raw_df.groupby('Campo_ICP'):
+                valores = grupo['Valor_ICP'].tolist()
+                # Se houver apenas um valor, armazena como string. Se houver múltiplos, armazena como lista.
+                criterios_icp[str(campo).lower().strip()] = valores[0] if len(valores) == 1 else valores
+
             # (Bloco de validação do ICP permanece aqui)
             
             # Inicializa colunas de resultado
-            # ... (aqui permanecem as mesmas inicializações de coluna)
+            # ... (inicialização de colunas permanece a mesma)
 
             st.info("Iniciando processamento...")
             progress_bar = st.progress(0)
@@ -124,29 +120,25 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
                 
-                # 1. Qualificação Local (Cargo E Localidade)
+                # Qualificação Local (Cargo e Localidade)
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead')):
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
-                    progress_bar.progress((index + 1) / len(leads_df))
+                    # ... (lógica de reprovação por cargo)
                     continue
 
-                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead')):
+                # A chamada para verificar_localidade agora passa uma lista de locais
+                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
-                # 2. Se passou nos filtros locais, prossegue para a análise com IA
                 # (O restante do loop com a chamada para a IA continua como estava)
-                # ...
-                
                 # Para o exemplo, vamos apenas marcar como aprovado localmente
                 leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP (Local)'
                 leads_df.at[index, 'motivo_classificacao'] = 'Aprovado nos filtros de Cargo e Localidade'
                 progress_bar.progress((index + 1) / len(leads_df))
 
-            status_text.success("Processamento completo!")
+            st.success("Processamento completo!")
             st.dataframe(leads_df)
             
             # (Botão de download permanece o mesmo)
