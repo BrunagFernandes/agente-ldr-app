@@ -38,20 +38,20 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     prompt = f"""
     Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o site de um lead e compará-lo com os critérios do meu ICP.
 
-    AJA EM DUAS ETAPAS:
+    **AJA EM DUAS ETAPAS:**
     1.  Primeiro, acesse e leia o conteúdo principal do site na seguinte URL: {url_do_lead}
     2.  Depois, com base no conteúdo que você leu, analise o site de acordo com os critérios abaixo.
 
-    Critérios do ICP da Minha Empresa:
+    **Critérios do ICP da Minha Empresa:**
     - {info_base_comparacao}
     - Segmentos Válidos (para qualificação e categorização): [{criterios_icp.get('Segmento_Desejado_do_Lead', 'N/A')}]
 
-    REGRAS RÍGIDAS PARA SUA RESPOSTA:
+    **REGRAS RÍGIDAS PARA SUA RESPOSTA:**
     - NÃO FAÇA suposições ou inferências se a informação não for clara.
     - Se a informação sobre a minha empresa (seja o site ou a descrição) não for suficiente para uma comparação de concorrência real, retorne 'is_concorrente' como false e explique no motivo que a informação de base era insuficiente.
     - NÃO INVENTE DADOS EM HIPÓTESE ALGUMA.
 
-    Sua Resposta (Obrigatório):
+    **Sua Resposta (Obrigatório):**
     Responda APENAS com um objeto JSON válido, contendo as seguintes chaves:
     - "is_concorrente": coloque true se, com base na informação fornecida, o lead for um concorrente direto. Senão, false.
     - "motivo_concorrente": explique em uma frase curta o motivo.
@@ -95,9 +95,10 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         if leads_df is not None and icp_raw_df is not None:
             criterios_icp = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             
-            # --- BARREIRA DE VALIDAÇÃO OBRIGATÓRIA (VERSÃO CORRETA COM "OU") ---
-            site_contratante = criterios_icp.get('Site_da_Empresa_Contratante', '').strip()
-            desc_contratante = criterios_icp.get('Descricao_da_Empresa_Contratante', '').strip()
+            # --- BARREIRA DE VALIDAÇÃO (VERSÃO FINAL E CORRIGIDA) ---
+            # Converte para string ANTES de usar o .strip() para evitar o AttributeError com células vazias (NaN)
+            site_contratante = str(criterios_icp.get('Site_da_Empresa_Contratante', '')).strip()
+            desc_contratante = str(criterios_icp.get('Descricao_da_Empresa_Contratante', '')).strip()
 
             # Verifica se o site parece uma URL real
             is_site_valid = (len(site_contratante) > 4 and '.' in site_contratante and '[INSIRA' not in site_contratante)
@@ -110,7 +111,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                 st.error("ERRO DE CONFIGURAÇÃO: O processo foi interrompido. Para a análise de concorrência funcionar, preencha o campo 'Site_da_Empresa_Contratante' OU o campo 'Descricao_da_Empresa_Contratante' no seu arquivo ICP.")
                 st.stop()
             # --- FIM DA BARREIRA ---
-
+            
             # Inicializa colunas de resultado
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
@@ -156,8 +157,8 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
-            # (As funções de padronização final seriam chamadas aqui antes de exibir/baixar)
-
+            # (As funções de padronização final seriam chamadas aqui)
+            
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(
                 label="⬇️ Baixar resultado completo (.csv)",
