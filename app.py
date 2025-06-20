@@ -1,5 +1,4 @@
-# --- VERSÃO FINAL - ANÁLISE DIRETA COM IA ---
-
+# --- VERSÃO FINAL E CORRETA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -12,32 +11,18 @@ def ler_csv_flexivel(arquivo_upado):
     """Lê um arquivo CSV com separador flexível (ponto e vírgula ou vírgula)."""
     try:
         arquivo_upado.seek(0)
-        # Tenta com ponto e vírgula, depois com vírgula
-        try:
-            df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8')
-        except pd.errors.ParserError:
-            arquivo_upado.seek(0)
-            df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8')
-
+        df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
         if df.shape[1] == 1:
             arquivo_upado.seek(0)
-            df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8')
-            if df.shape[1] == 1:
-                 st.warning("O arquivo CSV parece ter um separador inválido. Tente usar ';' ou ','.")
-                 return None
+            df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
         return df
     except Exception as e:
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    """
-    Usa a IA para visitar a URL, ler o conteúdo e fazer a análise completa do ICP.
-    """
-    # Cria o modelo de IA
+    """Usa a IA para visitar a URL, ler o conteúdo e fazer a análise completa do ICP."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-
-    # Cria o prompt com a URL para a IA visitar
     prompt = f"""
     Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o site de um lead e compará-lo com os critérios do meu ICP.
 
@@ -62,7 +47,7 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
-        return {"error": "Falha na análise da IA", "details": str(e)}
+        return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
@@ -94,23 +79,24 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         if leads_df is not None and icp_raw_df is not None:
             criterios_icp = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             
-            leads_df['classificacao_icp'] = 'Aguardando Análise'
-            leads_df['motivo_classificacao'] = ''
-            leads_df['categoria_do_lead'] = ''
+            # Inicializa colunas de resultado
+            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
+                if col not in leads_df.columns:
+                    leads_df[col] = 'Aguardando Análise'
 
             st.info("Iniciando processamento com IA... Isso pode levar alguns minutos.")
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             for index, lead in leads_df.iterrows():
-                status_text.text(f"Analisando: {lead['Nome_Empresa']}...")
+                status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
                 
-                # 1. Qualificação Local (Rápida e Gratuita)
+                # 1. Qualificação Local
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('Cargos_de_Interesse_do_Lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
                 else:
-                    # 2. Qualificação com IA (Apenas para quem passou no filtro de cargo)
+                    # 2. Qualificação com IA
                     site_url = lead.get('Site_Original')
                     if pd.notna(site_url) and site_url.strip() != '':
                         if not site_url.startswith(('http://', 'https://')):
@@ -135,7 +121,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                 
                 progress_bar.progress((index + 1) / len(leads_df))
             
-            status_text.success("Processamento concluído!")
+            status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
