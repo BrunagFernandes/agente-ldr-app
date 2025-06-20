@@ -1,4 +1,4 @@
-# --- VERSÃO DE DIAGNÓSTICO COM FUNÇÃO DE LOCALIDADE SIMPLIFICADA ---
+# --- VERSÃO FINAL COM CORREÇÃO DO ATTRIBUTEERROR ---
 import streamlit as st
 import pandas as pd
 import io
@@ -22,6 +22,7 @@ def ler_csv_flexivel(arquivo_upado):
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     """Usa a IA para visitar a URL e fazer a análise completa do ICP."""
+    # (Esta função permanece a mesma)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante')}"
     if '[INSIRA O SITE' in info_base_comparacao or not criterios_icp.get('site_da_empresa_contratante'):
@@ -39,30 +40,22 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
 
-# --- FUNÇÕES DE QUALIFICAÇÃO LOCAL ---
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
-    if pd.isna(cargo_lead) or cargo_lead.strip() == '' or pd.isna(cargos_icp_str): return False
+    if pd.isna(cargo_lead) or cargos_icp_str.strip() == '': return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
     return cargo_lead.strip().lower() in cargos_de_interesse
 
-# --- FUNÇÃO DE LOCALIDADE SIMPLIFICADA PARA TESTE ---
 def verificar_localidade_simplificada(lead_row, localidade_icp_str):
     """Versão simplificada que verifica um único local (cidade, estado ou país)."""
-    if pd.isna(localidade_icp_str) or localidade_icp_str.strip().lower() == 'brasil' or local_icp_str.strip() == '':
+    if localidade_icp_str.strip().lower() == 'brasil' or localidade_icp_str.strip() == '':
         return True
-
-    # Prepara os dados de localidade do lead
     loc_lead = [
         str(lead_row.get('Cidade_Contato', '')).strip().lower(),
         str(lead_row.get('Estado_Contato', '')).strip().lower(),
         str(lead_row.get('Pais_Contato', '')).strip().lower()
     ]
-    
-    # Prepara os requisitos do ICP
     requisitos_icp = [req.strip().lower() for req in localidade_icp_str.split(',')]
-    
-    # Verifica se todos os requisitos estão nos dados do lead
     for requisito in requisitos_icp:
         if requisito not in loc_lead:
             return False
@@ -92,9 +85,11 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # ... (bloco de validação) ...
+            # (Bloco de validação do ICP permanece aqui)
             
-            # ... (inicialização de colunas) ...
+            for col in ['classificacao_icp', 'motivo_classificacao']:
+                if col not in leads_df.columns:
+                    leads_df[col] = ''
 
             st.info("Iniciando processamento...")
             progress_bar = st.progress(0)
@@ -103,20 +98,25 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
                 
-                # Chamando a nova função simplificada
-                if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead')) or \
-                   not verificar_localidade_simplificada(lead, criterios_icp.get('localidade_especifica_do_lead', '')):
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    # ... (lógica de motivo) ...
-                else:
-                    # ... (lógica de análise com IA) ...
-                    leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP (Local)' # Placeholder
+                # --- CHAMADA DAS FUNÇÕES CORRIGIDA (com str()) ---
+                cargo_ok = verificar_cargo(str(lead.get('Cargo')), str(criterios_icp.get('cargos_de_interesse_do_lead', '')))
+                localidade_ok = verificar_localidade_simplificada(lead, str(criterios_icp.get('localidade_especifica_do_lead', '')))
 
+                if not cargo_ok or not localidade_ok:
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    motivo_cargo = 'Cargo fora do perfil' if not cargo_ok else ''
+                    motivo_loc = 'Localidade fora do perfil' if not localidade_ok else ''
+                    leads_df.at[index, 'motivo_classificacao'] = ' '.join(filter(None, [motivo_cargo, motivo_loc])).strip()
+                else:
+                    # (lógica de análise com IA) ...
+                    leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP (Local)'
+                
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
-            # (Botão de download)
+            csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
     else:
         st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
