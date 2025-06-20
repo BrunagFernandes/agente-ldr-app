@@ -1,4 +1,3 @@
-# --- VERSÃO FINAL COM FLUXO DE ANÁLISE COMPLETO RESTAURADO ---
 import streamlit as st
 import pandas as pd
 import io
@@ -38,7 +37,7 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
-        return {"error": "Falha na análise da IA", "details": str(e)}
+        return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
@@ -90,7 +89,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = dict(zip(icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0])))
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # (Bloco de validação do ICP permanece aqui)
+            # Validação do ICP...
             
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns: leads_df[col] = ''
@@ -103,35 +102,50 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
                 
                 # 1. Qualificação Local
-                if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead', '')) or \
-                   not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    motivo = "Cargo fora do perfil" if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead', '')) else "Localidade fora do perfil"
-                    leads_df.at[index, 'motivo_classificacao'] = motivo
-                    progress_bar.progress((index + 1) / len(leads_df))
-                    continue
+                cargo_ok = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead', ''))
+                localidade_ok = verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []))
 
-                # 2. Verificação de Auto-Exclusão
-                site_lead_clean = str(lead.get('Site_Original', '')).lower().replace('https://', '').replace('http://', '').replace('www.', '').strip('/')
-                site_meu_clean = str(criterios_icp.get('site_da_empresa_contratante', '')).lower().replace('https://', '').replace('http://', '').replace('www.', '').strip('/')
-                if site_lead_clean and site_meu_clean and site_lead_clean == site_meu_clean:
+                if not cargo_ok or not localidade_ok:
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Empresa é o próprio contratante'
-                    progress_bar.progress((index + 1) / len(leads_df))
-                    continue
-                
-                # 3. Análise com IA
-                site_url = lead.get('Site_Original')
-                if pd.notna(site_url) and site_url.strip() != '':
-                    if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
-                    
-                    analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
-                    
-                    if "error" not in analise:
-                        leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
-                            leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                    motivo_cargo = 'Cargo fora do perfil' if not cargo_ok else ''
+                    motivo_loc = 'Localidade fora do perfil' if not localidade_ok else ''
+                    leads_df.at[index, 'motivo_classificacao'] = ' '.join(filter(None, [motivo_cargo, motivo_loc])).strip()
+                else:
+                    # 2. Análise com IA
+                    site_url = lead.get('Site_Original')
+                    if pd.notna(site_url) and site_url.strip() != '':
+                        if not site_url.startswith(('http://', 'https://')): site_url = 'https://' + site_url
+                        
+                        analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
+                        
+                        if "error" not in analise:
+                            leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                            
+                            # Lógica de classificação
+                            if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                                leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                                leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                            else:
+                                leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                                # --- BLOCO DE CÓDIGO CORRIGIDO ---
+                                if analise.get('is_concorrente'):
+                                    motivo = f"Concorrente: {analise.get('is_concorrente')}. Motivo: {analise.get('motivo_concorrente')}"
+                                else:
+                                    motivo = f"Segmento incorreto. Motivo: {analise.get('motivo_segmento')}"
+                                leads_df.at[index, 'motivo_classificacao'] = motivo
                         else:
-                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                            motivo = f"Concorrente: {analise.get('is_concor
+                            leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
+                            leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
+                        leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
+                
+                progress_bar.progress((index + 1) / len(leads_df))
+            
+            status_text.success("Processamento completo!")
+            st.dataframe(leads_df)
+            
+            csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
+    else:
+        st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
