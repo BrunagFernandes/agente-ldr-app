@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL COM LÓGICA DE LOCALIDADE CORRIGIDA E INDENTAÇÃO LIMPA ---
+# --- VERSÃO DE DIAGNÓSTICO COM FUNÇÃO DE LOCALIDADE SIMPLIFICADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -33,54 +33,40 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt, request_options={"timeout": 60})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
 
+# --- FUNÇÕES DE QUALIFICAÇÃO LOCAL ---
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
     if pd.isna(cargo_lead) or cargo_lead.strip() == '' or pd.isna(cargos_icp_str): return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in cargos_icp_str.split(',')]
     return cargo_lead.strip().lower() in cargos_de_interesse
 
-def verificar_localidade(lead_row, locais_icp):
-    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
-    # Garante que sempre trabalhamos com uma lista, mesmo se o ICP tiver só um local
-    if isinstance(locais_icp, str):
-        locais_icp = [locais_icp]
-    
-    # Se a lista de locais for vazia ou conter 'brasil', aprova todos
-    if not locais_icp or any(loc.strip().lower() == 'brasil' for loc in locais_icp):
+# --- FUNÇÃO DE LOCALIDADE SIMPLIFICADA PARA TESTE ---
+def verificar_localidade_simplificada(lead_row, localidade_icp_str):
+    """Versão simplificada que verifica um único local (cidade, estado ou país)."""
+    if pd.isna(localidade_icp_str) or localidade_icp_str.strip().lower() == 'brasil' or local_icp_str.strip() == '':
         return True
 
-    regioes = {
-        'sudeste': ['sp', 'rj', 'es', 'mg'],
-        'sul': ['pr', 'sc', 'rs'],
-        'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
-        'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
-        'centro-oeste': ['ms', 'mt', 'go', 'df']
-    }
-
     # Prepara os dados de localidade do lead
-    cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
-    estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
-    pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
+    loc_lead = [
+        str(lead_row.get('Cidade_Contato', '')).strip().lower(),
+        str(lead_row.get('Estado_Contato', '')).strip().lower(),
+        str(lead_row.get('Pais_Contato', '')).strip().lower()
+    ]
     
-    # Verifica se o lead corresponde a QUALQUER UM dos locais permitidos
-    for local_permitido in locais_icp:
-        local_permitido_clean = local_permitido.lower().strip()
-        if local_permitido_clean in regioes:
-            if estado_lead in regioes[local_permitido_clean]:
-                return True 
-        else:
-            partes_requisito = [part.strip() for part in local_permitido_clean.split(',')]
-            lead_data_comparable = [cidade_lead, estado_lead, pais_lead]
-            if all(parte in lead_data_comparable for parte in partes_requisito):
-                return True
-
-    return False
+    # Prepara os requisitos do ICP
+    requisitos_icp = [req.strip().lower() for req in localidade_icp_str.split(',')]
+    
+    # Verifica se todos os requisitos estão nos dados do lead
+    for requisito in requisitos_icp:
+        if requisito not in loc_lead:
+            return False
+    return True
 
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
@@ -103,16 +89,34 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            # Lógica para ler multiplas linhas do mesmo campo (como localidade)
-            criterios_icp = {}
-            for campo, grupo in icp_raw_df.groupby('Campo_ICP'):
-                valores = grupo['Valor_ICP'].tolist()
-                criterios_icp[str(campo).lower().strip()] = valores if len(valores) > 1 else valores[0]
+            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
+            criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
+            
+            # ... (bloco de validação) ...
+            
+            # ... (inicialização de colunas) ...
 
-            # Inicializa colunas de resultado
-            # (O restante do código para processar e exibir os resultados permanece aqui)
-            # ... (código do loop for, etc.) ...
-            st.success("Lógica de exemplo - substitua pelo loop de processamento completo.")
+            st.info("Iniciando processamento...")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for index, lead in leads_df.iterrows():
+                status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
+                
+                # Chamando a nova função simplificada
+                if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead')) or \
+                   not verificar_localidade_simplificada(lead, criterios_icp.get('localidade_especifica_do_lead', '')):
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    # ... (lógica de motivo) ...
+                else:
+                    # ... (lógica de análise com IA) ...
+                    leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP (Local)' # Placeholder
+
+                progress_bar.progress((index + 1) / len(leads_df))
+            
+            status_text.success("Processamento completo!")
             st.dataframe(leads_df)
+            
+            # (Botão de download)
     else:
         st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
