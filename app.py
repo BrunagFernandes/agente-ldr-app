@@ -1,4 +1,4 @@
-# --- VERSÃO CORRETA PARA DEPURAÇÃO DO ENRIQUECIMENTO DE TELEFONE ---
+# --- VERSÃO COM PROMPT "ANTI-ALUCINAÇÃO" ---
 import streamlit as st
 import pandas as pd
 import io
@@ -6,9 +6,8 @@ import json
 import google.generativeai as genai
 
 # --- FUNÇÕES DO AGENTE ---
-
+# A função ler_csv_flexivel permanece a mesma.
 def ler_csv_flexivel(arquivo_upado):
-    """Lê um arquivo CSV com separador flexível."""
     try:
         arquivo_upado.seek(0)
         df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
@@ -20,50 +19,60 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-def analisar_icp_e_telefone_com_ia(url_do_lead, criterios_icp):
-    """Usa a IA para visitar a URL, fazer a análise completa E extrair o telefone."""
+def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
+    """Usa a IA para visitar a URL e fazer a análise, com prompt aprimorado."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
-    if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
-        info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
     
+    # Prepara a base de comparação, usando site ou descrição
+    info_base_comparacao = ""
+    site_contratante = criterios_icp.get('site_da_empresa_contratante', '')
+    desc_contratante = criterios_icp.get('descricao_da_empresa_contratante', '')
+    if site_contratante and '[INSIRA' not in site_contratante:
+        info_base_comparacao = f"O site da minha empresa é: {site_contratante}"
+    elif desc_contratante and '[Descreva' not in desc_contratante:
+        info_base_comparacao = f"A minha empresa é descrita como: '{desc_contratante}'"
+
     prompt = f"""
-    Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é visitar um site, extrair todo o seu texto, e depois analisá-lo.
+    Você é um Analista de Negócios Cético e Focado em Fatos. Sua tarefa é analisar o conteúdo de um site e responder a perguntas sobre ele, seguindo regras rígidas.
 
-    **AJA EM DUAS ETAPAS INDEPENDENTES:**
-    1.  **EXTRAÇÃO DE TEXTO:** Primeiro, acesse e extraia TODO o texto visível da página na seguinte URL: {url_do_lead}
-    2.  **ANÁLISE E EXTRAÇÃO DE DADOS:** Com base no texto que você extraiu na Etapa 1, preencha o seguinte objeto JSON.
+    **ETAPA 1: COLETA DE DADOS**
+    Acesse e leia o conteúdo da URL: {url_do_lead}
 
-    **Critérios do ICP da Minha Empresa para a Análise:**
+    **ETAPA 2: ANÁLISE E EXTRAÇÃO (BASEADA ESTRITAMENTE NO TEXTO COLETADO)**
+    Com base no texto da Etapa 1, responda às perguntas abaixo.
+
+    **Critérios da Minha Empresa para Comparação:**
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
+    - Descrição da minha solução: [{criterios_icp.get('observacoes_gerais_do_lead_ideal', 'N/A')}]
 
-    **REGRAS RÍGIDAS PARA A RESPOSTA:**
-    - O JSON deve conter uma chave "texto_extraido" com o texto completo da Etapa 1.
-    - O JSON deve conter uma chave "telefone_encontrado". Procure pelo telefone de contato principal. Se não encontrar, retorne EXATAMENTE a string "N/A". NÃO INVENTE NÚMEROS.
-    - As outras chaves devem ser preenchidas com base na sua análise do texto.
+    **REGRAS DE ANÁLISE:**
+    1.  **Concorrência:** O lead só é um concorrente se o produto principal dele resolver EXATAMENTE o mesmo problema que a 'Descrição da minha solução' indica. Não o considere concorrente apenas por estar no mesmo segmento.
+    2.  **Telefone:** O telefone DEVE ser uma citação direta do texto do site. Se você não puder copiar e colar um número de telefone do texto, você DEVE retornar "N/A". É proibido usar conhecimento externo ou inventar.
+    3.  **Fidelidade:** Todas as suas respostas DEVEM ser baseadas unicamente no texto que você leu do site. Se a informação não estiver lá, admita.
 
     **Sua Resposta (Obrigatório):**
-    Responda APENAS com um objeto JSON válido com as chaves: "texto_extraido", "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento", "telefone_encontrado".
+    Responda APENAS com um objeto JSON válido com as seguintes chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento", "telefone_encontrado".
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 90})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
-        return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
+        return {"error": "Falha na análise da IA", "details": str(e)}
 
+# (O restante das funções e da interface do Streamlit permanece o mesmo)
+# ... (verificar_cargo, interface, loop principal, etc.) ...
+# O código completo está abaixo para garantir
 def verificar_cargo(cargo_lead, cargos_icp_str):
-    """Verifica se o cargo do lead está na lista de interesse do ICP."""
-    if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return False
-    if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
+    if pd.isna(cargo_lead) or pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return False
+    if str(cargo_lead).strip() == '': return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in str(cargos_icp_str).split(',')]
     return str(cargo_lead).strip().lower() in cargos_de_interesse
 
-# --- INTERFACE DO APLICATIVO (STREAMLIT) ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
 st.title("🤖 Agente LDR com Inteligência Artificial")
-st.write("Faça o upload dos seus arquivos para qualificação e análise de leads.")
+st.write("Faça o upload dos seus arquivos para qualificação, enriquecimento e padronização de leads.")
 
 arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
 arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
@@ -83,10 +92,11 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         if leads_df is not None and icp_raw_df is not None:
             criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
-            
-            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'telefone_enriquecido']:
+
+            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'telefone_enriquecido', 'cargo_valido']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
+            leads_df['cargo_valido'] = False
 
             st.info("Iniciando processamento...")
             progress_bar = st.progress(0)
@@ -95,39 +105,33 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead')):
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Cargo fora do perfil'
-                else:
-                    site_url = lead.get('Site_Original')
-                    if pd.notna(site_url) and str(site_url).strip() != '':
-                        if not str(site_url).startswith(('http://', 'https://')):
-                            site_url = 'https://' + str(site_url)
+                leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
+                
+                site_url = lead.get('Site_Original')
+                
+                if pd.notna(site_url) and str(site_url).strip() != '':
+                    if not str(site_url).startswith(('http://', 'https://')):
+                        site_url = 'https://' + str(site_url)
+                    
+                    analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
+                    
+                    if "error" not in analise:
+                        leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                        leads_df.at[index, 'telefone_enriquecido'] = analise.get('telefone_encontrado', 'N/A')
                         
-                        analise = analisar_icp_e_telefone_com_ia(site_url, criterios_icp)
-                        
-                        # --- NOSSO INSPETOR ESTÁ AQUI ---
-                        texto_extraido = analise.get('texto_extraido', 'A IA não retornou o texto extraído.')
-                        with st.expander(f"Ver texto lido de {lead.get('Nome_Empresa')}"):
-                            st.text_area("Texto usado para análise:", texto_extraido, height=200)
-
-                        if "error" not in analise:
-                            leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                            leads_df.at[index, 'telefone_enriquecido'] = analise.get('telefone_encontrado', 'N/A')
-                            
-                            if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
-                                leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                                leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
-                            else:
-                                leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                                motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                                leads_df.at[index, 'motivo_classificacao'] = motivo
+                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                            leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
                         else:
-                            leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                            leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                            motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                            leads_df.at[index, 'motivo_classificacao'] = motivo
                     else:
-                        leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                        leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
+                        leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
+                        leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                else:
+                    leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
                 
                 progress_bar.progress((index + 1) / len(leads_df))
             
