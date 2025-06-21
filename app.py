@@ -1,4 +1,4 @@
-# --- VERSÃO COM EXTRAÇÃO FOCADA EM MÚLTIPLAS ETAPAS ---
+# --- VERSÃO FINAL E COMPLETA - ENRIQUECIMENTO EM 3 ETAPAS ---
 import streamlit as st
 import pandas as pd
 import io
@@ -21,20 +21,15 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-# --- NOVAS FUNÇÕES DE ENRIQUECIMENTO EM CASCATA ---
-def encontrar_pagina_contato(url_principal):
-    """Pede para a IA encontrar a URL da página de contato."""
+def encontrar_pagina_contato(url_principal, criterios_icp):
+    """(PLANO B) Pede para a IA encontrar a URL da página de contato."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    prompt = f"""
-    Analise o site na URL '{url_principal}'. Encontre o link para a página de 'Contato', 'Fale Conosco' ou similar.
-    Responda APENAS com a URL completa dessa página. Se não encontrar, responda "N/A".
-    """
+    prompt = f"Visite o site '{url_principal}'. Encontre o link para a página de 'Contato', 'Fale Conosco' ou similar. Responda APENAS com a URL completa da página. Se não encontrar, responda 'N/A'."
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
         link_contato = response.text.strip()
         if link_contato.lower().startswith('http'):
             return link_contato
-        # Se o link for relativo (ex: /contato), junta com a URL principal
         elif link_contato.startswith('/'):
             return urljoin(url_principal, link_contato)
         else:
@@ -42,14 +37,10 @@ def encontrar_pagina_contato(url_principal):
     except Exception:
         return "N/A"
 
-def extrair_telefone_de_pagina_especifica(url_pagina):
-    """Pede para a IA extrair um telefone de uma página específica."""
+def extrair_telefone_de_pagina_especifica(url_pagina, criterios_icp):
+    """(PLANO C) Pede para a IA extrair um telefone de uma página específica."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    prompt = f"""
-    Extraia o principal número de telefone comercial da página na URL '{url_pagina}'.
-    O número deve estar explicitamente no texto. Não invente dados.
-    Responda APENAS com o número de telefone encontrado ou com "N/A".
-    """
+    prompt = f"Sua única tarefa é encontrar o principal número de telefone comercial na página '{url_pagina}'. Inspecione o texto e o código HTML. Responda APENAS com o número de telefone que encontrar ou com 'N/A'."
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
         telefone = response.text.strip()
@@ -61,26 +52,25 @@ def extrair_telefone_de_pagina_especifica(url_pagina):
         return "N/A"
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    """Usa a IA para visitar a URL, fazer a análise principal e uma primeira tentativa de pegar o telefone."""
+    """(PLANO A) Usa a IA para visitar a URL, fazer a análise principal e uma primeira tentativa de pegar o telefone."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
     
     prompt = f"""
-    Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é visitar o site na URL {url_do_lead}, extrair um telefone e analisar a empresa.
-
-    AJA EM TRÊS ETAPAS, NESTA ORDEM:
-    1.  Acesse e leia o conteúdo principal do site.
-    2.  EXTRAIA o principal número de telefone para contato comercial que esteja visível na página principal. Se não encontrar, retorne "N/A".
-    3.  FAÇA A ANÁLISE da empresa conforme os critérios abaixo.
-
-    Critérios do ICP da Minha Empresa:
+    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
+    Critérios do ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
-
-    Sua Resposta (Obrigatório):
-    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento", e "telefone_encontrado" (com o resultado da Etapa 2).
+    - Descrição da minha solução: [{criterios_icp.get('observacoes_gerais_do_lead_ideal', 'N/A')}]
+    
+    Regras da Resposta JSON:
+    1. is_concorrente: true apenas se o produto do lead resolve o MESMO problema que a 'Descrição da minha solução'.
+    2. telefone_encontrado: Procure pelo telefone principal no texto da página inicial. DEVE ser uma citação direta. Se não encontrar, retorne "N/A". NÃO INVENTE.
+    3. Preencha as outras chaves com base na sua análise.
+    
+    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento", "telefone_encontrado".
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 90})
@@ -89,10 +79,10 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# (As outras funções como verificar_cargo permanecem as mesmas)
 def verificar_cargo(cargo_lead, cargos_icp_str):
-    if pd.isna(cargo_lead) or pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return False
-    if str(cargo_lead).strip() == '': return False
+    """Verifica se o cargo do lead está na lista de interesse do ICP."""
+    if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return False
+    if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in str(cargos_icp_str).split(',')]
     return str(cargo_lead).strip().lower() in cargos_de_interesse
 
@@ -142,28 +132,24 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                     analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
                     
                     if "error" not in analise:
-                        # Preenche os resultados da análise principal
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
                             leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
                             leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
                         else:
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                            leads_df.at[index, 'motivo_classificacao'] = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                            motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                            leads_df.at[index, 'motivo_classificacao'] = motivo
                         
-                        # --- LÓGICA DE ENRIQUECIMENTO DE TELEFONE EM CASCATA ---
-                        telefone_site = analise.get('telefone_encontrado', 'N/A')
-                        if telefone_site != 'N/A' and telefone_site:
-                            leads_df.at[index, 'telefone_enriquecido'] = telefone_site
+                        telefone_encontrado = analise.get('telefone_encontrado', 'N/A')
+                        if telefone_encontrado != 'N/A' and telefone_encontrado:
+                            leads_df.at[index, 'telefone_enriquecido'] = telefone_encontrado
                         else:
-                            # PLANO B: Buscar a página de contato
-                            status_text.text(f"Telefone não encontrado no site. Buscando página de contato para {lead.get('Nome_Empresa')}...")
-                            url_contato = encontrar_pagina_contato(site_url)
-
+                            status_text.text(f"Telefone não encontrado no site... buscando página de contato...")
+                            url_contato = encontrar_pagina_contato(site_url, criterios_icp)
                             if url_contato != "N/A":
-                                # PLANO C: Extrair telefone da página de contato
-                                status_text.text(f"Página de contato encontrada. Buscando telefone em {url_contato}...")
-                                telefone_final = extrair_telefone_de_pagina_especifica(url_contato)
+                                status_text.text(f"Página de contato encontrada! Extraindo telefone...")
+                                telefone_final = extrair_telefone_de_pagina_especifica(url_contato, criterios_icp)
                                 leads_df.at[index, 'telefone_enriquecido'] = telefone_final
                             else:
                                 leads_df.at[index, 'telefone_enriquecido'] = 'N/A'
