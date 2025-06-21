@@ -1,4 +1,4 @@
-# --- VERSÃO DEFINITIVA: IA FAZ VISITA E ANÁLISE ---
+# --- VERSÃO DEFINITIVA - IA FAZ VISITA E ANÁLISE ---
 import streamlit as st
 import pandas as pd
 import io
@@ -11,10 +11,19 @@ def ler_csv_flexivel(arquivo_upado):
     """Lê um arquivo CSV com separador flexível."""
     try:
         arquivo_upado.seek(0)
-        df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
+        # Tenta com ponto e vírgula, depois com vírgula
+        try:
+            df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
+        except (pd.errors.ParserError, UnicodeDecodeError):
+            arquivo_upado.seek(0)
+            df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
+
         if df.shape[1] == 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
+            if df.shape[1] == 1:
+                st.warning("O arquivo CSV parece ter um separador inválido. Tente usar ';' ou ','.")
+                return None
         return df
     except Exception as e:
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
@@ -31,8 +40,8 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     Você é um Analista de Desenvolvimento de Leads Sênior. Sua tarefa é analisar o site de um lead e compará-lo com os critérios do meu ICP.
 
     AJA EM DUAS ETAPAS:
-    1.  Primeiro, acesse e leia o conteúdo principal da seguinte URL: {url_do_lead}
-    2.  Depois, com base no conteúdo que você leu, analise o site de acordo com os critérios abaixo.
+    1. Primeiro, acesse e leia o conteúdo principal da seguinte URL: {url_do_lead}
+    2. Depois, com base no conteúdo que você leu, analise o site de acordo com os critérios abaixo.
 
     Critérios do ICP da Minha Empresa:
     - {info_base_comparacao}
@@ -72,7 +81,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         try:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
         except (KeyError, AttributeError):
-            st.error("Chave de API do Google não configurada.")
+            st.error("Chave de API do Google não configurada. Adicione-a nos 'Secrets' do seu aplicativo Streamlit.")
             st.stop()
         
         st.info("Lendo arquivos...")
@@ -83,8 +92,6 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # (Adicione aqui a validação de ICP se desejar)
-
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -94,7 +101,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             status_text = st.empty()
             
             for index, lead in leads_df.iterrows():
-                status_text.text(f"Analisando: {lead.get('Nome_Empresa', 'Empresa Desconhecida')}...")
+                status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
                 if not verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead', '')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
