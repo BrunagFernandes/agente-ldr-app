@@ -170,73 +170,7 @@ def normalizar_texto(texto):
         'bahia': 'ba', 'ceara': 'ce', 'distrito federal': 'df', 'espirito santo': 'es',
         'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 'mato grosso do sul': 'ms',
         'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr',
-        'pernambuco': '# --- NOVA FUNÇÃO DE APOIO PARA NORMALIZAÇÃO ---
-def normalizar_texto(texto):
-    """Converte para minúsculo, remove acentos e espaços extras."""
-    if pd.isna(texto):
-        return ""
-    s = str(texto).lower().strip()
-    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-    return s
-
-# --- FUNÇÃO DE LOCALIDADE TOTALMENTE REESCRITA E CORRIGIDA ---
-def verificar_localidade(lead_row, locais_icp):
-    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões, de forma flexível."""
-    if not isinstance(locais_icp, list):
-        locais_icp = [locais_icp]
-    
-    if not locais_icp or pd.isna(locais_icp).all():
-        return True
-        
-    if len(locais_icp) == 1 and normalizar_texto(locais_icp[0]) == 'brasil':
-        return True
-
-    mapa_estados = {
-        'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 
-        'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 
-        'mato grosso do sul': 'ms', 'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr', 
-        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 
-        'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 
-        'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
-    }
-    mapa_siglas = {v: k for k, v in mapa_estados.items()}
-    
-    regioes = {
-        'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
-        'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
-        'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
-        'centro-oeste': ['ms', 'mt', 'go', 'df']
-    }
-
-    # Normaliza os dados do lead e cria um CONJUNTO de locais possíveis para ele
-    cidade_lead_norm = normalizar_texto(lead_row.get('Cidade_Contato', ''))
-    estado_lead_norm = normalizar_texto(lead_row.get('Estado_Contato', ''))
-    pais_lead_norm = normalizar_texto(lead_row.get('Pais_Contato', ''))
-    
-    # Adiciona tanto o nome completo quanto a sigla do estado para a verificação
-    estado_lead_sigla = mapa_estados.get(estado_lead_norm, estado_lead_norm)
-    estado_lead_nome_completo = mapa_siglas.get(estado_lead_norm, estado_lead_norm)
-
-    locais_possiveis_lead = {cidade_lead_norm, estado_lead_sigla, estado_lead_nome_completo, pais_lead_norm}
-    # Remove valores vazios que podem ter entrado no conjunto
-    locais_possiveis_lead.discard('')
-    
-    # Verifica cada regra do ICP
-    for local_permitido in locais_icp:
-        regra_normalizada = normalizar_texto(local_permitido)
-        
-        # Cenário 1: A regra é uma região?
-        if regra_normalizada in regioes:
-            if estado_lead_sigla in regioes[regra_normalizada]:
-                return True
-        # Cenário 2: A regra é um local específico
-        else:
-            partes_requisito = {normalizar_texto(part.strip()) for part in regra_normalizada.split(',')}
-            
-            if partes_requisito.issubset(locais_possiveis_lead):
-                return True
-                
-    return Falsepe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn',
+        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn',
         'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc',
         'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
     }
