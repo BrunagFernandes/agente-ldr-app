@@ -160,15 +160,17 @@ def normalizar_texto(texto):
     return s
 
 def verificar_localidade(lead_row, locais_icp):
-    if not isinstance(locais_icp, list):
-        locais_icp = [locais_icp]
-    
-    if not locais_icp or pd.isna(locais_icp).all():
-        return True
-        
-    if len(locais_icp) == 1 and normalizar_texto(locais_icp[0]) == 'brasil':
-        return True
+    """
+    Verifica se a localidade do lead atende a múltiplos critérios ou regiões, 
+    de forma flexível, insensível a acentos, maiúsculas/minúsculas e siglas.
+    """
+    # Helper function interna para evitar NameError e garantir consistência
+    def _normalizar(texto):
+        if pd.isna(texto): return ""
+        s = str(texto).lower().strip()
+        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
+    # Dicionários de mapeamento
     mapa_estados = {
         'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 
         'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 
@@ -178,7 +180,6 @@ def verificar_localidade(lead_row, locais_icp):
         'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
     }
     mapa_siglas = {v: k for k, v in mapa_estados.items()}
-    
     regioes = {
         'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
         'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
@@ -186,27 +187,39 @@ def verificar_localidade(lead_row, locais_icp):
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
 
-    cidade_lead_norm = normalizar_texto(lead_row.get('Cidade_Contato', ''))
-    estado_lead_norm = normalizar_texto(lead_row.get('Estado_Contato', ''))
-    pais_lead_norm = normalizar_texto(lead_row.get('Pais_Contato', ''))
+    # Tratamento da regra do ICP
+    if not isinstance(locais_icp, list):
+        locais_icp = [locais_icp]
     
-    estado_lead_sigla = mapa_estados.get(estado_lead_norm, estado_lead_norm)
-    estado_lead_nome_completo = mapa_siglas.get(estado_lead_norm, estado_lead_norm)
-
-    locais_possiveis_lead = {cidade_lead_norm, estado_lead_sigla, estado_lead_nome_completo, pais_lead_norm}
-    locais_possiveis_lead.discard('')
-    
-    for local_permitido in locais_icp:
-        regra_normalizada = normalizar_texto(local_permitido)
+    if not locais_icp or pd.isna(locais_icp).all():
+        return True
         
-        if regra_normalizada in regioes:
-            if estado_lead_sigla in regioes[regra_normalizada]:
-                return True
-        else:
-            partes_requisito = {normalizar_texto(part.strip()) for part in regra_normalizada.split(',')}
-            if partes_requisito.issubset(locais_possiveis_lead):
-                return True
-                
+    if len(locais_icp) == 1 and _normalizar(locais_icp[0]) == 'brasil':
+        return True
+
+    # Normalização dos dados do lead
+    cidade_lead = _normalizar(lead_row.get('Cidade_Contato', ''))
+    estado_lead = _normalizar(lead_row.get('Estado_Contato', ''))
+    
+    # Criação do conjunto de locais possíveis para o lead
+    estado_lead_sigla = mapa_estados.get(estado_lead, estado_lead)
+    estado_lead_nome_completo = mapa_siglas.get(estado_lead, estado_lead)
+    
+    locais_possiveis_lead = {cidade_lead, estado_lead_sigla, estado_lead_nome_completo}
+    locais_possiveis_lead.discard('') # Remove valores vazios que podem ter entrado no conjunto
+    
+    # Loop de verificação
+    for local_permitido in locais_icp:
+        # Pega a regra do ICP e normaliza CADA PARTE dela
+        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
+        # Ignora a parte 'brasil' da regra, já que não estamos validando país aqui
+        partes_requisito.discard('brasil')
+        partes_requisito.discard('')
+
+        # Verifica se todos os requisitos da regra estão contidos nos locais possíveis do lead
+        if partes_requisito.issubset(locais_possiveis_lead):
+            return True
+            
     return False
 
 # --- INTERFACE DO APLICATIVO ---
