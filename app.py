@@ -1,4 +1,4 @@
-# --- VERSÃO COM CORREÇÃO FINAL NA LÓGICA DE LOCALIDADE ---
+# --- VERSÃO COM MÚLTIPLOS MOTIVOS E IA CONDICIONAL ---
 import streamlit as st
 import pandas as pd
 import io
@@ -6,7 +6,7 @@ import json
 import re
 import google.generativeai as genai
 
-# --- FUNÇÕES DO AGENTE ---
+# --- FUNÇÕES DO AGENTE (sem alterações) ---
 
 def ler_csv_flexivel(arquivo_upado):
     """Lê um arquivo CSV com separador flexível."""
@@ -43,18 +43,14 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
         return {"error": "Falha na análise da IA", "details": str(e)}
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
-    """Verifica se o cargo do lead está na lista de interesse do ICP."""
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
     cargos_de_interesse = [cargo.strip().lower() for cargo in str(cargos_icp_str).split(',')]
     return str(cargo_lead).strip().lower() in cargos_de_interesse
 
 def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
-    """Verifica se o número de funcionários do lead está na faixa do ICP."""
-    if pd.isna(faixa_icp_str) or str(faixa_icp_str).strip() == '':
-        return True
-    if pd.isna(funcionarios_lead):
-        return False
+    if pd.isna(faixa_icp_str) or str(faixa_icp_str).strip() == '': return True
+    if pd.isna(funcionarios_lead): return False
     try:
         funcionarios_str = str(funcionarios_lead).strip().lower().replace('.', '').replace(',', '')
         if 'k' in funcionarios_str:
@@ -62,56 +58,36 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
         else:
             funcionarios_num = pd.to_numeric(funcionarios_str)
         if pd.isna(funcionarios_num): return False
-    except (ValueError, TypeError):
-        return False
+    except (ValueError, TypeError): return False
     faixa_str = str(faixa_icp_str).lower()
     numeros = [int(s) for s in re.findall(r'\d+', faixa_str)]
     if not numeros: return False
-    if "acima" in faixa_str or "maior" in faixa_str:
-        return funcionarios_num > numeros[0]
-    elif "abaixo" in faixa_str or "menor" in faixa_str:
-        return funcionarios_num < numeros[0]
-    elif "-" in faixa_str and len(numeros) == 2:
-        return numeros[0] <= funcionarios_num <= numeros[1]
-    elif len(numeros) == 1:
-        return funcionarios_num >= numeros[0]
+    if "acima" in faixa_str or "maior" in faixa_str: return funcionarios_num > numeros[0]
+    elif "abaixo" in faixa_str or "menor" in faixa_str: return funcionarios_num < numeros[0]
+    elif "-" in faixa_str and len(numeros) == 2: return numeros[0] <= funcionarios_num <= numeros[1]
+    elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-# --- FUNÇÃO DE LOCALIDADE FINALMENTE CORRIGIDA ---
 def verificar_localidade(lead_row, locais_icp):
-    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
-    if isinstance(locais_icp, str):
-        locais_icp = [locais_icp]
-    
-    if not locais_icp: # Se a lista de locais for vazia, aprova todos.
-        return True
-
-    # Se a regra for apenas "brasil", aprova todos
-    if len(locais_icp) == 1 and locais_icp[0].strip().lower() == 'brasil':
-        return True
-
+    if isinstance(locais_icp, str): locais_icp = [locais_icp]
+    if not locais_icp or any(loc.strip().lower() == 'brasil' for loc in locais_icp): return True
     regioes = {
         'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
         'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
-
     cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
     estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
     pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
-    
     for local_permitido in locais_icp:
         local_permitido_clean = local_permitido.lower().strip()
         if local_permitido_clean in regioes:
-            if estado_lead in regioes[local_permitido_clean]:
-                return True 
+            if estado_lead in regioes[local_permitido_clean]: return True 
         else:
             partes_requisito = [part.strip().lower() for part in local_permitido_clean.split(',')]
             lead_data_comparable = [cidade_lead, estado_lead, pais_lead]
-            if all(parte in lead_data_comparable for parte in partes_requisito):
-                return True
-
+            if all(parte in lead_data_comparable for parte in partes_requisito): return True
     return False
 
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
@@ -138,11 +114,10 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'cargo_valido']:
+            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
-            leads_df['cargo_valido'] = False
-
+            
             st.info("Iniciando processamento...")
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -150,24 +125,32 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- QUALIFICAÇÃO LOCAL HIERÁRQUICA ---
+                # --- NOVA LÓGICA DE MÚLTIPLOS MOTIVOS ---
+                
+                motivos_reprovacao_local = []
+                
+                # 1. VERIFICA TODOS OS FILTROS LOCAIS E ACUMULA OS MOTIVOS
                 funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead'))
                 if not funcionarios_ok:
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
-                    progress_bar.progress((index + 1) / len(leads_df))
-                    continue
+                    motivos_reprovacao_local.append("Porte da empresa fora do perfil")
 
                 localidade_ok = verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []))
                 if not localidade_ok:
+                    motivos_reprovacao_local.append("Localidade fora do perfil")
+
+                cargo_ok = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
+                if not cargo_ok:
+                    motivos_reprovacao_local.append("Cargo fora do perfil")
+
+                # 2. DECISÃO "GATEKEEPER": A IA RODA?
+                # A porta só abre se as chaves de Funcionários E Localidade girarem.
+                if not funcionarios_ok or not localidade_ok:
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
+                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_reprovacao_local)
                     progress_bar.progress((index + 1) / len(leads_df))
-                    continue
+                    continue # Pula para o próximo lead
 
-                leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
-
-                # --- ANÁLISE COM IA ---
+                # 3. ANÁLISE COM IA (Se a porta abriu)
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
@@ -177,20 +160,34 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                     
                     if "error" not in analise:
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                        motivos_finais_ia = []
+                        
+                        # A empresa está no ICP?
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
                             leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                            motivos_finais_ia.append(analise.get('motivo_segmento', 'Segmento validado pela IA'))
                         else:
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                            motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                            leads_df.at[index, 'motivo_classificacao'] = motivo
+                            motivo_ia = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                            motivos_finais_ia.append(motivo_ia)
+                        
+                        # Adiciona o motivo do cargo, se houver
+                        if not cargo_ok:
+                            motivos_finais_ia.append("Cargo fora do perfil")
+                        
+                        leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_finais_ia)
+
                     else:
                         leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
                         leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
                 else:
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
-                
+                    # Adiciona o motivo do cargo, se houver, mesmo sem site
+                    motivo_sem_site = ["Site não informado"]
+                    if not cargo_ok:
+                        motivo_sem_site.append("Cargo fora do perfil")
+                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivo_sem_site)
+
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.success("Processamento completo!")
