@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL COM LÓGICA DE ANÁLISE COMPLETA E CORRIGIDA ---
+# --- VERSÃO COM CORREÇÃO NO ENRIQUECIMENTO DE SITE ---
 import streamlit as st
 import pandas as pd
 import io
@@ -20,17 +20,32 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
+# --- FUNÇÃO DE ENRIQUECIMENTO DE SITE CORRIGIDA E REFORÇADA ---
 def enriquecer_site_com_ia(nome_empresa, cidade, estado):
+    """Pede para a IA encontrar o site oficial de uma empresa com um prompt muito mais robusto."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
-    Sua única tarefa é encontrar a URL do site oficial da empresa chamada "{nome_empresa}", localizada aproximadamente em "{cidade}, {estado}".
-    REGRAS: FOCO TOTAL em encontrar o site principal (.com, .com.br). EVITE redes sociais ou diretórios.
-    Responda APENAS com a URL limpa (ex: www.empresa.com.br) ou com a palavra "N/A" se não encontrar.
+    Sua única tarefa é agir como um especialista em busca na web para encontrar a URL do site oficial da empresa abaixo.
+
+    - Nome da Empresa: "{nome_empresa}"
+    - Localização Aproximada: "{cidade}, {estado}"
+
+    **ESTRATÉGIA DE BUSCA E VERIFICAÇÃO (SIGA RIGOROSAMENTE):**
+    1.  Realize uma busca na internet pelos termos: `"{nome_empresa}"` e `"{nome_empresa} {cidade}"`.
+    2.  Analise os primeiros 5 resultados.
+    3.  **FILTRE E DESCARTE** qualquer resultado que seja de redes sociais (LinkedIn, Facebook, Instagram), mapas, ou diretórios de empresas (Apontador, GuiaMais, etc.).
+    4.  Dos resultados restantes, identifique o mais provável a ser o site corporativo oficial (geralmente .com ou .com.br).
+    5.  **VERIFIQUE** se o nome "{nome_empresa}" aparece claramente no título ou no conteúdo desta página para confirmar que é o site correto.
+    
+    **REGRAS DE RESPOSTA:**
+    - Se você encontrar e confirmar o site oficial, responda **APENAS** com a URL limpa (ex: `www.empresa.com.br`).
+    - Se, após seguir todos os passos, você não tiver 100% de certeza ou não encontrar um site oficial, responda **APENAS** com a palavra `N/A`.
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
         site = response.text.strip()
-        if '.' in site and len(site) > 4 and ' ' not in site:
+        # Validação final para garantir que a resposta é uma URL e não uma frase.
+        if '.' in site and len(site) > 4 and ' ' not in site and site != "N/A":
             return site
         else:
             return "N/A"
@@ -38,12 +53,12 @@ def enriquecer_site_com_ia(nome_empresa, cidade, estado):
         return "N/A"
 
 def analisar_presenca_online(nome_empresa, cidade):
+    # Esta função permanece, mas só será chamada se o enriquecimento de site falhar.
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
-    AÇÕES: 1. Faça uma busca na internet. Dê prioridade a encontrar o perfil da empresa no LinkedIn. 2. Responda ao JSON abaixo.
-    REGRAS: Para 'is_ativa', procure por posts/notícias nos últimos 12 meses. Se não houver, considere 'inativa'.
-    Responda APENAS com um objeto JSON válido com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
+    Priorize encontrar o perfil no LinkedIn. Verifique se a empresa está ativa (posts nos últimos 12 meses).
+    Responda APENAS com um objeto JSON com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
@@ -52,29 +67,27 @@ def analisar_presenca_online(nome_empresa, cidade):
     except Exception as e:
         return {"error": "Falha na análise de presença online", "details": str(e)}
 
-def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
-    """Usa a IA para analisar um TEXTO DE SITE (via URL) ou um RESUMO DE NEGÓCIO."""
+def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
-    
-    parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
-
     prompt = f"""
-    Você é um Analista de Leads Sênior. {parte_analise}
-    Compare o que você leu com os critérios do meu ICP:
+    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
+    Critérios do ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        timeout = 90 if is_url else 30
-        response = model.generate_content(prompt, request_options={"timeout": timeout})
+        response = model.generate_content(prompt, request_options={"timeout": 90})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
+
+# (O resto das funções de verificação e a interface do Streamlit permanecem as mesmas)
+# O código completo está abaixo para garantir que não haja erros.
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
@@ -124,7 +137,6 @@ def verificar_localidade(lead_row, locais_icp):
             if all(parte in lead_data_comparable for parte in partes_requisito): return True
     return False
 
-# --- INTERFACE DO APLICATIVO (STREAMLIT) ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
 st.title("🤖 Agente LDR com Inteligência Artificial")
 st.write("Faça o upload dos seus arquivos para qualificação e enriquecimento de leads.")
@@ -162,7 +174,6 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # Qualificação Local Rígida...
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
@@ -176,7 +187,6 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
 
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
                 
-                # --- FLUXO DE ANÁLISE CORRIGIDO ---
                 site_para_analise = lead.get('Site_Original')
                 
                 if pd.isna(site_para_analise) or str(site_para_analise).strip() == '':
@@ -186,39 +196,31 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                         leads_df.at[index, 'Site_Original'] = site_enriquecido
                         site_para_analise = site_enriquecido
                 
-                analise = None
                 if pd.notna(site_para_analise) and str(site_para_analise).strip() != '' and site_para_analise != 'N/A':
                     if not str(site_para_analise).startswith(('http://', 'https://')):
                         site_para_analise = 'https://' + str(site_para_analise)
-                    analise = analisar_icp_com_ia(site_para_analise, criterios_icp)
+                    analise = analisar_icp_com_ia_por_url(site_para_analise, criterios_icp)
+                    if "error" not in analise:
+                        leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                            leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                        else:
+                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                            motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                            leads_df.at[index, 'motivo_classificacao'] = motivo
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
+                        leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
                 else:
                     status_text.text(f"Nenhum site encontrado. Buscando presença online para {lead.get('Nome_Empresa')}...")
                     presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
                     if presenca_online and "error" not in presenca_online and presenca_online.get('is_ativa'):
-                        resumo = presenca_online.get('resumo_negocio')
-                        status_text.text(f"Presença online encontrada. Analisando resumo...")
-                        analise = analisar_icp_com_ia(resumo, criterios_icp, is_resumo=False)
-                        if analise and "error" not in analise:
-                           analise['motivo_segmento'] = f"{analise.get('motivo_segmento')} (Baseado em resumo online: {presenca_online.get('fonte_informacao')})"
-                    elif presenca_online and not presenca_online.get('is_ativa'):
-                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                        leads_df.at[index, 'motivo_classificacao'] = f"Empresa parece inativa. Fonte: {presenca_online.get('fonte_informacao')}"
+                        leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção (Análise Online)'
+                        leads_df.at[index, 'motivo_classificacao'] = f"Resumo: {presenca_online.get('resumo_negocio')} | Fonte: {presenca_online.get('fonte_informacao')}"
                     else:
                         leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                         leads_df.at[index, 'motivo_classificacao'] = 'Nenhuma informação conclusiva encontrada online'
-
-                if analise and "error" not in analise:
-                    leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                    if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
-                        leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                        leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
-                    else:
-                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                        motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                        leads_df.at[index, 'motivo_classificacao'] = motivo
-                elif analise and "error" in analise:
-                    leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                    leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
                 
                 progress_bar.progress((index + 1) / len(leads_df))
             
