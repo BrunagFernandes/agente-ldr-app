@@ -1,4 +1,4 @@
-# --- VERSÃO COM ENRIQUECIMENTO DE SITE "SUPER-INTELIGENTE" ---
+# --- VERSÃO COM ENRIQUECIMENTO DE SITE "NÍVEL DETETIVE" ---
 import streamlit as st
 import pandas as pd
 import io
@@ -20,35 +20,36 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-# --- FUNÇÃO DE ENRIQUECIMENTO DE SITE COM PROMPT APRIMORADO ---
+# --- FUNÇÃO DE ENRIQUECIMENTO DE SITE COM PROMPT "DETETIVE" ---
 def enriquecer_site_com_ia(nome_empresa, cidade, estado):
-    """Pede para a IA encontrar o site oficial de uma empresa com uma estratégia de 3 etapas."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
-    Sua única tarefa é agir como um especialista em busca na web para encontrar a URL do site oficial da empresa abaixo.
+    Sua única tarefa é agir como um detetive especialista em OSINT para encontrar a URL do site oficial da empresa abaixo.
 
     - Nome da Empresa: "{nome_empresa}"
     - Localização Aproximada: "{cidade}, {estado}"
 
     **ESTRATÉGIA DE BUSCA E VERIFICAÇÃO (SIGA RIGOROSAMENTE):**
-    1.  **BUSCAR:** Realize uma busca na internet pelos termos: `"{nome_empresa} site oficial"` e `"{nome_empresa} institucional"`.
-    2.  **ANALISAR E FILTRAR:** Analise os principais resultados. Descarte agressivamente qualquer link que seja de redes sociais (LinkedIn, Facebook, etc.), mapas ou diretórios. Priorize domínios limpos (como www.empresa.com.br) em vez de subdomínios (como carreiras.empresa.com.br).
-    3.  **VALIDAR:** Pegue o link mais provável e verifique se o nome "{nome_empresa}" aparece claramente no título da página ou em seu rodapé para confirmar que é o site correto.
+    1.  **BUSCAR:** Realize uma busca no Google com os termos exatos `"{nome_empresa} site oficial"`.
+    2.  **ANALISAR RESULTADOS:** Analise os 3 primeiros resultados orgânicos (ignore anúncios). Procure por uma URL que pareça ser o domínio principal da empresa.
+    3.  **FILTRAR:** Descarte agressivamente qualquer resultado que seja de redes sociais (LinkedIn, Facebook, etc.), mapas, ou diretórios de empresas.
+    4.  **VALIDAR:** Antes de responder, você deve visitar a URL candidata e confirmar se o nome "{nome_empresa}" aparece claramente no título da página (tag <title>) ou no rodapé (footer). Esta é a sua etapa de confirmação final.
     
     **REGRAS DE RESPOSTA:**
-    - Se você encontrar e confirmar o site oficial seguindo a estratégia acima, responda **APENAS** com a URL limpa (ex: `www.empresa.com.br`).
+    - Se, e somente se, você encontrar e validar o site oficial seguindo a estratégia acima, responda **APENAS** com a URL limpa (ex: `www.empresa.com.br`).
     - Se, após seguir todos os passos, você não tiver 100% de certeza, responda **APENAS** com a palavra `N/A`.
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
         site = response.text.strip()
-        # Validação final para garantir que a resposta é uma URL e não uma frase.
         if '.' in site and len(site) > 4 and ' ' not in site and site != "N/A":
             return site
         else:
             return "N/A"
     except Exception:
         return "N/A"
+
+# (O restante das funções permanece exatamente como na última versão estável)
 
 def analisar_presenca_online(nome_empresa, cidade):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
@@ -72,7 +73,6 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
     
     parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
-
     prompt = f"""
     Você é um Analista de Leads Sênior. {parte_analise}
     Compare o que você leu com os critérios do meu ICP:
