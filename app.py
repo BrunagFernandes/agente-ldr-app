@@ -197,29 +197,32 @@ def verificar_localidade(lead_row, locais_icp):
     if len(locais_icp) == 1 and _normalizar(locais_icp[0]) == 'brasil':
         return True
 
-    # Normalização dos dados do lead
+    # 1. Normaliza os dados do lead
     cidade_lead = _normalizar(lead_row.get('Cidade_Contato', ''))
     estado_lead = _normalizar(lead_row.get('Estado_Contato', ''))
     
-    # Criação do conjunto de locais possíveis para o lead
+    # 2. Cria um conjunto com todas as representações possíveis da localidade do lead
     estado_lead_sigla = mapa_estados.get(estado_lead, estado_lead)
-    estado_lead_nome_completo = mapa_siglas.get(estado_lead, estado_lead)
-    
-    locais_possiveis_lead = {cidade_lead, estado_lead_sigla, estado_lead_nome_completo}
-    locais_possiveis_lead.discard('') # Remove valores vazios que podem ter entrado no conjunto
-    
-    # Loop de verificação
-    for local_permitido in locais_icp:
-        # Pega a regra do ICP e normaliza CADA PARTE dela
-        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
-        # Ignora a parte 'brasil' da regra, já que não estamos validando país aqui
-        partes_requisito.discard('brasil')
-        partes_requisito.discard('')
+    estado_lead_nome_completo = mapa_siglas.get(estado_lead_sigla, estado_lead_sigla) # <-- CORREÇÃO ESTAVA AQUI
 
-        # Verifica se todos os requisitos da regra estão contidos nos locais possíveis do lead
-        if partes_requisito.issubset(locais_possiveis_lead):
-            return True
-            
+    locais_possiveis_lead = {cidade_lead, estado_lead_sigla, estado_lead_nome_completo}
+    locais_possiveis_lead.discard('')
+    
+    # 3. Loop de verificação
+    for local_permitido in locais_icp:
+        regra_normalizada = _normalizar(local_permitido)
+        
+        if regra_normalizada in regioes:
+            if estado_lead_sigla in regioes[regra_normalizada]:
+                return True
+        else:
+            partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
+            partes_requisito.discard('brasil')
+            partes_requisito.discard('')
+
+            if partes_requisito.issubset(locais_possiveis_lead):
+                return True
+                
     return False
 
 # --- INTERFACE DO APLICATIVO ---
