@@ -1,4 +1,4 @@
-# --- VERSÃO COM LÓGICA DE MOTIVOS CORRIGIDA E CONSOLIDADA ---
+# --- VERSÃO COM CLASSIFICAÇÃO "ALVO ESTRATÉGICO" ---
 import streamlit as st
 import pandas as pd
 import io
@@ -122,31 +122,23 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- LÓGICA DE QUALIFICAÇÃO REESTRUTURADA ---
+                # --- LÓGICA DE QUALIFICAÇÃO COM CLASSIFICAÇÃO ESPECIAL ---
                 
-                # 1. VERIFICAÇÃO LOCAL
+                motivos_classificacao_final = []
+
+                # 1. Filtros Rígidos (Gatekeeper)
                 funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead'))
                 localidade_ok = verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []))
-                cargo_ok = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
 
-                # 2. LÓGICA "GATEKEEPER" (PORTÃO PARA A IA)
                 if not funcionarios_ok or not localidade_ok:
-                    motivos_reprovacao = []
-                    if not funcionarios_ok:
-                        motivos_reprovacao.append("Porte da empresa fora do perfil")
-                    if not localidade_ok:
-                        motivos_reprovacao.append("Localidade fora do perfil")
-                    if not cargo_ok:
-                        motivos_reprovacao.append("Cargo fora do perfil")
-                    
+                    if not funcionarios_ok: motivos_classificacao_final.append("Porte da empresa fora do perfil")
+                    if not localidade_ok: motivos_classificacao_final.append("Localidade fora do perfil")
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_reprovacao)
+                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_classificacao_final)
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue 
 
-                # 3. ANÁLISE COM IA (SE O PORTÃO ABRIU)
-                motivos_finais = []
-                
+                # 2. Se passou nos filtros rígidos, prossegue para a análise da empresa
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
@@ -157,27 +149,35 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                     if "error" not in analise:
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
                         
-                        # Define a classificação baseada na IA
-                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                        # Verifica se a empresa se qualifica
+                        empresa_ok = analise.get('is_segmento_correto') and not analise.get('is_concorrente')
+                        
+                        # Verifica o cargo
+                        cargo_ok = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
+
+                        # Define a classificação e o motivo com base na combinação
+                        if empresa_ok and cargo_ok:
                             leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                            motivos_finais.append(analise.get('motivo_segmento', 'Segmento validado pela IA'))
-                        else:
+                            motivos_classificacao_final.append(analise.get('motivo_segmento', ''))
+                        elif empresa_ok and not cargo_ok:
+                            leads_df.at[index, 'classificacao_icp'] = 'Alvo Estratégico (Contato Inválido)'
+                            motivos_classificacao_final.append(f"Empresa qualificada: {analise.get('motivo_segmento')}")
+                            motivos_classificacao_final.append("Cargo do contato fora do perfil")
+                        else: # Se a empresa não for ok
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                             motivo_ia = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                            motivos_finais.append(motivo_ia)
-                    else:
+                            motivos_classificacao_final.append(motivo_ia)
+                            if not cargo_ok: # Adiciona o motivo do cargo se também for inválido
+                                motivos_classificacao_final.append("Cargo do contato fora do perfil")
+
+                    else: # Se a análise da IA deu erro
                         leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                        motivos_finais.append(analise.get('details', 'Erro desconhecido da IA.'))
-                else:
+                        motivos_classificacao_final.append(analise.get('details', 'Erro desconhecido da IA.'))
+                else: # Se não tem site
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                    motivos_finais.append('Site não informado')
+                    motivos_classificacao_final.append('Site não informado')
 
-                # Consolidação final dos motivos
-                if not cargo_ok:
-                    motivos_finais.append("Cargo fora do perfil")
-
-                leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_finais)
-
+                leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_classificacao_final)
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.success("Processamento completo!")
