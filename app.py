@@ -1,4 +1,4 @@
-# --- VERSÃO COM VERIFICAÇÃO DE E-MAIL ---
+# --- VERSÃO COM LEITURA FLEXÍVEL DE COLUNAS CORRIGIDA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -16,6 +16,8 @@ def ler_csv_flexivel(arquivo_upado):
         if df.shape[1] == 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
+        # Garante que os nomes das colunas não tenham espaços extras
+        df.columns = df.columns.str.strip()
         return df
     except Exception as e:
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
@@ -40,33 +42,33 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# --- NOVA FUNÇÃO DE VERIFICAÇÃO DE E-MAIL ---
-def verificar_dominio_email(email, site):
-    """Compara o domínio do e-mail com o domínio do site."""
-    if pd.isna(email) or pd.isna(site) or str(email).strip() == '' or str(site).strip() == '':
-        return '' # Retorna vazio se não tiver dados para comparar
-    
-    try:
-        # Extrai o domínio do e-mail (parte depois do @)
-        dominio_email = str(email).split('@')[1]
+# --- NOVA FUNÇÃO DE APOIO CORRIGIDA ---
+def get_valor_flexivel(row, nomes_possiveis, df_columns):
+    """Procura por um valor em uma linha tentando diferentes nomes de coluna."""
+    for nome in nomes_possiveis:
+        # Verifica se o nome da coluna (insensível a maiúsculas/minúsculas e espaços) existe no DataFrame
+        for col in df_columns:
+            if col.strip().lower() == nome.lower():
+                if pd.notna(row[col]):
+                    return row[col]
+    return None
 
-        # Extrai e limpa o domínio do site
+def verificar_dominio_email(email, site):
+    if not email or not site or pd.isna(email) or pd.isna(site):
+        return ''
+    try:
+        dominio_email = str(email).split('@')[1]
         if not str(site).startswith(('http://', 'https://')):
             site = 'https://' + str(site)
-        dominio_site = urlparse(site).netloc
-        dominio_site = dominio_site.replace('www.', '')
+        dominio_site = urlparse(site).netloc.replace('www.', '')
 
         if dominio_email.lower() == dominio_site.lower():
-            return '' # Domínios são iguais, nenhuma ação necessária
+            return ''
         else:
-            return 'Verificar E-mail' # Domínios diferentes, marcar para verificação
-    except IndexError:
-         # Caso o e-mail não tenha um formato válido com @
-        return 'E-mail inválido'
-    except Exception:
-        # Pega outros erros inesperados
-        return 'Erro ao verificar'
-
+            return 'Verificar E-mail'
+    except (IndexError, AttributeError):
+        return 'E-mail ou Site Inválido'
+    
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
@@ -93,7 +95,7 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-def verificar_localidade(lead_row, locais_icp):
+def verificar_localidade(lead_row, locais_icp, df_columns):
     if isinstance(locais_icp, str): locais_icp = [locais_icp]
     if not locais_icp or any(loc.strip().lower() == 'brasil' for loc in locais_icp): return True
     regioes = {
@@ -102,9 +104,10 @@ def verificar_localidade(lead_row, locais_icp):
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
-    cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
-    estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
-    pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
+    cidade_lead = str(get_valor_flexivel(lead_row, ['Cidade_Contato', 'cidade'], df_columns) or '').strip().lower()
+    estado_lead = str(get_valor_flexivel(lead_row, ['Estado_Contato', 'estado', 'uf'], df_columns) or '').strip().lower()
+    pais_lead = str(get_valor_flexivel(lead_row, ['Pais_Contato', 'pais'], df_columns) or '').strip().lower()
+
     for local_permitido in locais_icp:
         local_permitido_clean = local_permitido.lower().strip()
         if local_permitido_clean in regioes:
@@ -139,7 +142,6 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # Adiciona a nova coluna de verificação de e-mail
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'verificacao_email']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -148,31 +150,33 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
+            df_cols = leads_df.columns
+            
             for index, lead in leads_df.iterrows():
-                status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
+                status_text.text(f"Analisando: {get_valor_flexivel(lead, ['Nome_Empresa', 'nome da empresa'], df_cols) or f'Linha {index+2}'}...")
                 
-                # --- VERIFICAÇÃO DE E-MAIL ---
-                leads_df.at[index, 'verificacao_email'] = verificar_dominio_email(lead.get('Email_Lead'), lead.get('Site_Original'))
+                # --- VERIFICAÇÃO DE E-MAIL COM LEITURA FLEXÍVEL ---
+                email_lead = get_valor_flexivel(lead, ['Email_Lead', 'email', 'e-mail'], df_cols)
+                site_lead_original = get_valor_flexivel(lead, ['Site_Original', 'site', 'website'], df_cols)
+                leads_df.at[index, 'verificacao_email'] = verificar_dominio_email(email_lead, site_lead_original)
 
                 # Qualificação Local Rígida
-                if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
+                if not verificar_funcionarios(get_valor_flexivel(lead, ['Numero_Funcionarios', 'funcionarios'], df_cols), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
-                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
+                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []), df_cols):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
-                # Análise com IA
-                site_url = lead.get('Site_Original')
-                if pd.notna(site_url) and str(site_url).strip() != '':
-                    if not str(site_url).startswith(('http://', 'https://')):
-                        site_url = 'https://' + str(site_url)
+                if pd.notna(site_lead_original) and str(site_lead_original).strip() != '':
+                    if not str(site_lead_original).startswith(('http://', 'https://')):
+                        site_lead_original = 'https://' + str(site_lead_original)
                     
-                    analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
+                    analise = analisar_icp_com_ia_por_url(site_lead_original, criterios_icp)
                     
                     if "error" not in analise:
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
@@ -189,7 +193,7 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                 else:
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
                     leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
-                
+
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.success("Processamento completo!")
