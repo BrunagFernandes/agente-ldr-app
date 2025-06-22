@@ -151,37 +151,78 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-# --- FUNÇÃO DE LOCALIDADE FINALMENTE CORRIGIDA ---
+# --- NOVA FUNÇÃO DE APOIO PARA NORMALIZAÇÃO ---
+def normalizar_texto(texto):
+    """Converte para minúsculo, remove acentos e caracteres especiais."""
+    if pd.isna(texto):
+        return ""
+    # Transforma para minúsculo e remove espaços extras
+    s = str(texto).lower().strip()
+    # Remove acentos
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    return s
+
+# --- FUNÇÃO DE LOCALIDADE TOTALMENTE REESCRITA E CORRIGIDA ---
 def verificar_localidade(lead_row, locais_icp):
-    if not locais_icp or (isinstance(locais_icp, list) and not all(locais_icp)):
-        return True
-
-    if not isinstance(locais_icp, list):
+    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões, de forma flexível."""
+    # Garante que sempre trabalhamos com uma lista, mesmo se o ICP tiver só um local
+    if isinstance(locais_icp, str):
         locais_icp = [locais_icp]
-
-    if len(locais_icp) == 1 and str(locais_icp[0]).strip().lower() == 'brasil':
+    
+    # Se a lista de locais for vazia ou foi preenchida com algo que o pandas leu como nulo
+    if not locais_icp or pd.isna(locais_icp).all():
+        return True
+        
+    # A regra de 'aprovar todos' só funciona se o ÚNICO critério for 'brasil'
+    if len(locais_icp) == 1 and normalizar_texto(locais_icp[0]) == 'brasil':
         return True
 
+    mapa_estados = {
+        'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am',
+        'bahia': 'ba', 'ceara': 'ce', 'distrito federal': 'df', 'espirito santo': 'es',
+        'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 'mato grosso do sul': 'ms',
+        'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr',
+        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn',
+        'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc',
+        'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
+    }
+    
     regioes = {
-        'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
+        'sudeste': ['sp', 'rj', 'es', 'mg'],
+        'sul': ['pr', 'sc', 'rs'],
         'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
-    cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
-    estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
-    pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
+
+    # Normaliza os dados do lead
+    cidade_lead_norm = normalizar_texto(lead_row.get('Cidade_Contato', ''))
+    estado_lead_norm = normalizar_texto(lead_row.get('Estado_Contato', ''))
     
+    # Converte o estado do lead (seja sigla ou nome) para a sigla padrão
+    # Ex: 'sao paulo' vira 'sp', e 'sp' continua 'sp'
+    estado_lead_sigla = mapa_estados.get(estado_lead_norm, estado_lead_norm)
+    
+    # Prepara os dados do lead para comparação
+    lead_data_comparable = {cidade_lead_norm, estado_lead_sigla}
+
+    # Verifica cada regra do ICP
     for local_permitido in locais_icp:
-        local_permitido_clean = str(local_permitido).lower().strip()
-        if local_permitido_clean in regioes:
-            if estado_lead in regioes[local_permitido_clean]:
-                return True 
-        else:
-            partes_requisito = [part.strip().lower() for part in local_permitido_clean.split(',')]
-            lead_data_comparable = [cidade_lead, estado_lead, pais_lead]
-            if all(parte in lead_data_comparable for parte in partes_requisito):
+        regra_normalizada = normalizar_texto(local_permitido)
+        
+        # Cenário 1: A regra é uma região?
+        if regra_normalizada in regioes:
+            if estado_lead_sigla in regioes[regra_normalizada]:
                 return True
+        # Cenário 2: A regra é um local específico
+        else:
+            partes_requisito = {normalizar_texto(part) for part in regra_normalizada.split(',')}
+            # Converte as partes do requisito para sigla, se for um nome de estado
+            partes_requisito_final = {mapa_estados.get(p, p) for p in partes_requisito}
+            
+            if partes_requisito_final.issubset(lead_data_comparable):
+                return True
+                
     return False
 
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
