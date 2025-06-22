@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL COM CORREÇÃO DE LÓGICA E ENRIQUECIMENTO APRIMORADO ---
+# --- VERSÃO COM AJUSTE VISUAL NA COLUNA CARGO_VALIDO ---
 import streamlit as st
 import pandas as pd
 import io
@@ -6,7 +6,7 @@ import json
 import re
 import google.generativeai as genai
 
-# --- FUNÇÕES DO AGENTE ---
+# --- FUNÇÕES DO AGENTE (sem alterações) ---
 
 def ler_csv_flexivel(arquivo_upado):
     try:
@@ -20,23 +20,18 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-# --- FUNÇÃO DE ENRIQUECIMENTO DE SITE CORRIGIDA E REFORÇADA ---
 def enriquecer_site_com_ia(nome_empresa, cidade, estado):
-    """Pede para a IA encontrar o site oficial de uma empresa com um prompt muito mais robusto."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Sua única tarefa é agir como um especialista em busca na web para encontrar a URL do site oficial da empresa abaixo.
-
     - Nome da Empresa: "{nome_empresa}"
     - Localização Aproximada: "{cidade}, {estado}"
-
     **ESTRATÉGIA DE BUSCA E VERIFICAÇÃO (SIGA RIGOROSAMENTE):**
     1.  Realize uma busca na internet pelos termos: `"{nome_empresa}"` e `"{nome_empresa} {cidade}"`.
     2.  Analise os primeiros 5 resultados.
     3.  **FILTRE E DESCARTE** qualquer resultado que seja de redes sociais (LinkedIn, Facebook, Instagram), mapas, ou diretórios de empresas (Apontador, GuiaMais, etc.).
     4.  Dos resultados restantes, identifique o mais provável a ser o site corporativo oficial (geralmente .com ou .com.br).
     5.  **VERIFIQUE** se o nome "{nome_empresa}" aparece claramente no título ou no conteúdo desta página para confirmar que é o site correto.
-    
     **REGRAS DE RESPOSTA:**
     - Se você encontrar e confirmar o site oficial, responda **APENAS** com a URL limpa (ex: `www.empresa.com.br`).
     - Se, após seguir todos os passos, você não tiver 100% de certeza ou não encontrar um site oficial, responda **APENAS** com a palavra `N/A`.
@@ -66,30 +61,25 @@ def analisar_presenca_online(nome_empresa, cidade):
     except Exception as e:
         return {"error": "Falha na análise de presença online", "details": str(e)}
 
-def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
+def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
-    
-    parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
-
     prompt = f"""
-    Você é um Analista de Leads Sênior. {parte_analise}
-    Compare o que você leu com os critérios do meu ICP:
+    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
+    Critérios do ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        timeout = 90 if is_url else 30
-        response = model.generate_content(prompt, request_options={"timeout": timeout})
+        response = model.generate_content(prompt, request_options={"timeout": 90})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# (As funções de verificação permanecem as mesmas)
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
@@ -165,6 +155,7 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
             if 'Site_Original' not in leads_df.columns:
                 leads_df['Site_Original'] = ''
             
+            # --- CORREÇÃO: Mantendo a coluna 'cargo_valido' ---
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'cargo_valido']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -187,6 +178,7 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
+                # --- CORREÇÃO: Preenchendo a coluna 'cargo_valido' ---
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
                 
                 site_para_analise = lead.get('Site_Original')
