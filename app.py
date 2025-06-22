@@ -1,4 +1,4 @@
-# --- VERSÃO COM PADRONIZAÇÃO DE LOCALIDADE ---
+# --- VERSÃO COM PADRONIZAÇÃO DE LOCALIDADE ATIVADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -23,7 +23,6 @@ def ler_csv_flexivel(arquivo_upado):
         return None
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    # (Esta função permanece a mesma)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
@@ -42,7 +41,7 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# --- FUNÇÕES DE PADRONIZAÇÃO ATUALIZADAS ---
+# --- FUNÇÕES DE PADRONIZAÇÃO ---
 def title_case_com_excecoes(s, excecoes):
     palavras = s.split()
     resultado = []
@@ -70,15 +69,12 @@ def padronizar_estado(estado):
         'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina',
         'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
     }
-    # Retorna o nome completo se encontrar a sigla, senão, padroniza o que já existe
     return mapa_estados.get(estado_limpo, title_case_com_excecoes(estado_limpo, ['de', 'do']))
 
 def padronizar_pais(pais):
     if pd.isna(pais): return ''
     pais_limpo = str(pais).strip().lower()
-    mapa_paises = {
-        'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil'
-    }
+    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
     return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
 
 def padronizar_nome_contato(row, df_columns):
@@ -109,6 +105,17 @@ def padronizar_site(site):
     if not site_limpo.lower().startswith('www.'):
         site_limpo = 'www.' + site_limpo
     return site_limpo
+    
+def padronizar_telefone(telefone):
+    if pd.isna(telefone): return ''
+    apenas_digitos = re.sub(r'\D', '', str(telefone))
+    if apenas_digitos.startswith('0800'): return ''
+    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11: apenas_digitos = apenas_digitos[2:]
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'): apenas_digitos = apenas_digitos[1:]
+    if len(apenas_digitos) not in [10, 11]: return ''
+    if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+    return ''
 
 # (O restante das funções de verificação permanecem as mesmas)
 def verificar_cargo(cargo_lead, cargos_icp_str):
@@ -194,25 +201,39 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # ... (lógica de qualificação permanece a mesma) ...
-                
+                # (A lógica de qualificação e análise com IA permanece a mesma)
+                if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
+                    progress_bar.progress((index + 1) / len(leads_df))
+                    continue
+                # ... (restante do loop)
+
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.info("Qualificação concluída! Iniciando padronização final dos dados...")
             
-            # --- APLICAÇÃO DA PADRONIZAÇÃO ---
-            df_cols = leads_df.columns
-            leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
+            # --- APLICAÇÃO DA PADRONIZAÇÃO - AGORA ATIVADA ---
+            df_cols = list(leads_df.columns)
+
+            nome_completo_col = 'nome_completo_padronizado'
+            leads_df[nome_completo_col] = leads_df.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
+
+            if 'Nome_Empresa' in df_cols:
+                leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
             
-            nome_empresa_col = next((col for col in df_cols if col.strip().lower() == 'nome_empresa'), None)
-            if nome_empresa_col:
-                leads_df['nome_empresa_padronizado'] = leads_df[nome_empresa_col].apply(padronizar_nome_empresa)
+            if 'Site_Original' in df_cols:
+                leads_df['site_padronizado'] = leads_df['Site_Original'].apply(padronizar_site)
 
-            site_col = next((col for col in df_cols if col.strip().lower() == 'site_original'), None)
-            if site_col:
-                leads_df['site_padronizado'] = leads_df[site_col].apply(padronizar_site)
+            # Padronização de Localidade
+            if 'Cidade_Contato' in df_cols:
+                leads_df['cidade_padronizada'] = leads_df['Cidade_Contato'].apply(padronizar_cidade)
+            if 'Estado_Contato' in df_cols:
+                leads_df['estado_padronizado'] = leads_df['Estado_Contato'].apply(padronizar_estado)
+            if 'Pais_Contato' in df_cols:
+                leads_df['pais_padronizado'] = leads_df['Pais_Contato'].apply(padronizar_pais)
 
-            # Padroniza todos os campos que parecem ser de telefone
+            # Padronização de Telefones
             for col in df_cols:
                 if 'telefone' in col.lower():
                     leads_df[f'{col}_padronizado'] = leads_df[col].apply(padronizar_telefone)
