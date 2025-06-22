@@ -1,11 +1,12 @@
-# --- VERSÃO FINAL COM CORREÇÃO DE LOCALIDADE E CLASSIFICAÇÃO ---
+# --- VERSÃO FINAL E ESTÁVEL ---
 import streamlit as st
 import pandas as pd
 import io
 import json
 import re
-from urllib.parse import urlparse
+import unicodedata
 import google.generativeai as genai
+from urllib.parse import urlparse
 
 # --- FUNÇÕES DO AGENTE ---
 
@@ -44,6 +45,7 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
     
     parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
+
     prompt = f"""
     Você é um Analista de Leads Sênior. {parte_analise}
     Compare o que você leu com os critérios do meu ICP:
@@ -59,32 +61,6 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-def title_case_com_excecoes(s, excecoes):
-    palavras = str(s).split()
-    resultado = []
-    for i, palavra in enumerate(palavras):
-        if i > 0 and palavra.lower() in excecoes:
-            resultado.append(palavra.lower())
-        else:
-            resultado.append(palavra.capitalize())
-    return ' '.join(resultado)
-
-def padronizar_localidade_geral(valor, tipo):
-    if pd.isna(valor): return ''
-    mapa_estados = {'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'}
-    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
-    
-    if tipo == 'cidade':
-        cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
-        return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
-    elif tipo == 'estado':
-        estado_limpo = str(valor).strip().lower()
-        return mapa_estados.get(estado_limpo, title_case_com_excecoes(estado_limpo, ['de', 'do']))
-    elif tipo == 'pais':
-        pais_limpo = str(valor).strip().lower()
-        return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
-    return valor
-
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
     sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
@@ -96,6 +72,16 @@ def padronizar_nome_contato(row, df_columns):
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
+
+def title_case_com_excecoes(s, excecoes):
+    palavras = str(s).split()
+    resultado = []
+    for i, palavra in enumerate(palavras):
+        if i > 0 and palavra.lower() in excecoes:
+            resultado.append(palavra.lower())
+        else:
+            resultado.append(palavra.capitalize())
+    return ' '.join(resultado)
 
 def padronizar_nome_empresa(nome_empresa):
     if pd.isna(nome_empresa): return ''
@@ -125,6 +111,21 @@ def padronizar_telefone(telefone):
     elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     return ''
 
+def padronizar_localidade_geral(valor, tipo):
+    if pd.isna(valor): return ''
+    if tipo == 'cidade':
+        cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
+        return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
+    elif tipo == 'estado':
+        estado_limpo = str(valor).strip().lower()
+        mapa_estados = {'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'}
+        return mapa_estados.get(estado_limpo, title_case_com_excecoes(estado_limpo, ['de', 'do']))
+    elif tipo == 'pais':
+        pais_limpo = str(valor).strip().lower()
+        mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
+        return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
+    return valor
+
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
@@ -151,69 +152,64 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-# --- NOVA FUNÇÃO DE APOIO PARA NORMALIZAÇÃO ---
+# --- FUNÇÃO DE APOIO E FUNÇÃO DE LOCALIDADE CORRIGIDAS ---
 def normalizar_texto(texto):
-    """Converte para minúsculo, remove acentos e caracteres especiais."""
-    if pd.isna(texto):
-        return ""
-    # Transforma para minúsculo e remove espaços extras
+    if pd.isna(texto): return ""
     s = str(texto).lower().strip()
-    # Remove acentos
     s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
     return s
 
-# --- FUNÇÃO DE LOCALIDADE TOTALMENTE REESCRITA E CORRIGIDA ---
-
+def verificar_localidade(lead_row, locais_icp):
+    if not isinstance(locais_icp, list):
+        locais_icp = [locais_icp]
+    
+    if not locais_icp or pd.isna(locais_icp).all():
+        return True
+        
+    if len(locais_icp) == 1 and normalizar_texto(locais_icp[0]) == 'brasil':
+        return True
 
     mapa_estados = {
-        'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am',
-        'bahia': 'ba', 'ceara': 'ce', 'distrito federal': 'df', 'espirito santo': 'es',
-        'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 'mato grosso do sul': 'ms',
-        'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr',
-        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn',
-        'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc',
+        'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 
+        'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 
+        'mato grosso do sul': 'ms', 'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr', 
+        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 
+        'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 
         'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
     }
+    mapa_siglas = {v: k for k, v in mapa_estados.items()}
     
     regioes = {
-        'sudeste': ['sp', 'rj', 'es', 'mg'],
-        'sul': ['pr', 'sc', 'rs'],
+        'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
         'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
 
-    # Normaliza os dados do lead
     cidade_lead_norm = normalizar_texto(lead_row.get('Cidade_Contato', ''))
     estado_lead_norm = normalizar_texto(lead_row.get('Estado_Contato', ''))
+    pais_lead_norm = normalizar_texto(lead_row.get('Pais_Contato', ''))
     
-    # Converte o estado do lead (seja sigla ou nome) para a sigla padrão
-    # Ex: 'sao paulo' vira 'sp', e 'sp' continua 'sp'
     estado_lead_sigla = mapa_estados.get(estado_lead_norm, estado_lead_norm)
-    
-    # Prepara os dados do lead para comparação
-    lead_data_comparable = {cidade_lead_norm, estado_lead_sigla}
+    estado_lead_nome_completo = mapa_siglas.get(estado_lead_norm, estado_lead_norm)
 
-    # Verifica cada regra do ICP
+    locais_possiveis_lead = {cidade_lead_norm, estado_lead_sigla, estado_lead_nome_completo, pais_lead_norm}
+    locais_possiveis_lead.discard('')
+    
     for local_permitido in locais_icp:
         regra_normalizada = normalizar_texto(local_permitido)
         
-        # Cenário 1: A regra é uma região?
         if regra_normalizada in regioes:
             if estado_lead_sigla in regioes[regra_normalizada]:
                 return True
-        # Cenário 2: A regra é um local específico
         else:
-            partes_requisito = {normalizar_texto(part) for part in regra_normalizada.split(',')}
-            # Converte as partes do requisito para sigla, se for um nome de estado
-            partes_requisito_final = {mapa_estados.get(p, p) for p in partes_requisito}
-            
-            if partes_requisito_final.issubset(lead_data_comparable):
+            partes_requisito = {normalizar_texto(part.strip()) for part in regra_normalizada.split(',')}
+            if partes_requisito.issubset(locais_possiveis_lead):
                 return True
                 
     return False
 
-# --- INTERFACE DO APLICATIVO (STREAMLIT) ---
+# --- INTERFACE DO APLICATIVO ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
 st.title("🤖 Agente LDR com Inteligência Artificial")
 st.write("Faça o upload dos seus arquivos para qualificação e padronização de leads.")
@@ -234,7 +230,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
+            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
@@ -248,7 +244,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- FLUXO DE QUALIFICAÇÃO E ANÁLISE RESTAURADO ---
+                # --- FLUXO DE QUALIFICAÇÃO E ANÁLISE COMPLETO E CORRIGIDO ---
                 analise = None
                 
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
@@ -264,7 +260,6 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                             site_url = 'https://' + str(site_url)
                         analise = analisar_icp_com_ia(site_url, criterios_icp)
                     else:
-                        # Lógica de presença online para leads sem site
                         status_text.text(f"Site não informado. Buscando presença online para {lead.get('Nome_Empresa')}...")
                         presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
                         if presenca_online and "error" not in presenca_online and presenca_online.get('is_ativa'):
@@ -291,7 +286,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                     leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
 
                 progress_bar.progress((index + 1) / len(leads_df))
-            
+
             status_text.info("Qualificação concluída! Iniciando padronização final dos dados...")
             
             df_cols = list(leads_df.columns)
