@@ -1,4 +1,4 @@
-# --- VERSÃO COM MÚLTIPLOS MOTIVOS E IA CONDICIONAL ---
+# --- VERSÃO COM LÓGICA DE MOTIVOS CORRIGIDA E CONSOLIDADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -9,7 +9,6 @@ import google.generativeai as genai
 # --- FUNÇÕES DO AGENTE (sem alterações) ---
 
 def ler_csv_flexivel(arquivo_upado):
-    """Lê um arquivo CSV com separador flexível."""
     try:
         arquivo_upado.seek(0)
         df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
@@ -22,12 +21,10 @@ def ler_csv_flexivel(arquivo_upado):
         return None
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    """Usa a IA para visitar a URL e fazer a análise completa do ICP."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
-    
     prompt = f"""
     Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
     Critérios do ICP:
@@ -125,32 +122,31 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- NOVA LÓGICA DE MÚLTIPLOS MOTIVOS ---
+                # --- LÓGICA DE QUALIFICAÇÃO REESTRUTURADA ---
                 
-                motivos_reprovacao_local = []
-                
-                # 1. VERIFICA TODOS OS FILTROS LOCAIS E ACUMULA OS MOTIVOS
+                # 1. VERIFICAÇÃO LOCAL
                 funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead'))
-                if not funcionarios_ok:
-                    motivos_reprovacao_local.append("Porte da empresa fora do perfil")
-
                 localidade_ok = verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []))
-                if not localidade_ok:
-                    motivos_reprovacao_local.append("Localidade fora do perfil")
-
                 cargo_ok = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
-                if not cargo_ok:
-                    motivos_reprovacao_local.append("Cargo fora do perfil")
 
-                # 2. DECISÃO "GATEKEEPER": A IA RODA?
-                # A porta só abre se as chaves de Funcionários E Localidade girarem.
+                # 2. LÓGICA "GATEKEEPER" (PORTÃO PARA A IA)
                 if not funcionarios_ok or not localidade_ok:
+                    motivos_reprovacao = []
+                    if not funcionarios_ok:
+                        motivos_reprovacao.append("Porte da empresa fora do perfil")
+                    if not localidade_ok:
+                        motivos_reprovacao.append("Localidade fora do perfil")
+                    if not cargo_ok:
+                        motivos_reprovacao.append("Cargo fora do perfil")
+                    
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_reprovacao_local)
+                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_reprovacao)
                     progress_bar.progress((index + 1) / len(leads_df))
-                    continue # Pula para o próximo lead
+                    continue 
 
-                # 3. ANÁLISE COM IA (Se a porta abriu)
+                # 3. ANÁLISE COM IA (SE O PORTÃO ABRIU)
+                motivos_finais = []
+                
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
@@ -160,33 +156,27 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                     
                     if "error" not in analise:
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                        motivos_finais_ia = []
                         
-                        # A empresa está no ICP?
+                        # Define a classificação baseada na IA
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
                             leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                            motivos_finais_ia.append(analise.get('motivo_segmento', 'Segmento validado pela IA'))
+                            motivos_finais.append(analise.get('motivo_segmento', 'Segmento validado pela IA'))
                         else:
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                             motivo_ia = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                            motivos_finais_ia.append(motivo_ia)
-                        
-                        # Adiciona o motivo do cargo, se houver
-                        if not cargo_ok:
-                            motivos_finais_ia.append("Cargo fora do perfil")
-                        
-                        leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_finais_ia)
-
+                            motivos_finais.append(motivo_ia)
                     else:
                         leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                        leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                        motivos_finais.append(analise.get('details', 'Erro desconhecido da IA.'))
                 else:
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                    # Adiciona o motivo do cargo, se houver, mesmo sem site
-                    motivo_sem_site = ["Site não informado"]
-                    if not cargo_ok:
-                        motivo_sem_site.append("Cargo fora do perfil")
-                    leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivo_sem_site)
+                    motivos_finais.append('Site não informado')
+
+                # Consolidação final dos motivos
+                if not cargo_ok:
+                    motivos_finais.append("Cargo fora do perfil")
+
+                leads_df.at[index, 'motivo_classificacao'] = ", ".join(motivos_finais)
 
                 progress_bar.progress((index + 1) / len(leads_df))
             
