@@ -1,4 +1,4 @@
-# --- VERSÃO COM LEITURA FLEXÍVEL DE COLUNAS CORRIGIDA ---
+# --- VERSÃO COM PADRONIZAÇÃO FINAL DE DADOS ---
 import streamlit as st
 import pandas as pd
 import io
@@ -16,7 +16,6 @@ def ler_csv_flexivel(arquivo_upado):
         if df.shape[1] == 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
-        # Garante que os nomes das colunas não tenham espaços extras
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
@@ -42,33 +41,66 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# --- NOVA FUNÇÃO DE APOIO CORRIGIDA ---
-def get_valor_flexivel(row, nomes_possiveis, df_columns):
-    """Procura por um valor em uma linha tentando diferentes nomes de coluna."""
-    for nome in nomes_possiveis:
-        # Verifica se o nome da coluna (insensível a maiúsculas/minúsculas e espaços) existe no DataFrame
-        for col in df_columns:
-            if col.strip().lower() == nome.lower():
-                if pd.notna(row[col]):
-                    return row[col]
-    return None
+# --- NOVAS FUNÇÕES DE PADRONIZAÇÃO ---
+def padronizar_nome_contato(row, df_columns):
+    """Junta o primeiro nome com o último sobrenome, ignorando conectivos."""
+    nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
+    sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
 
-def verificar_dominio_email(email, site):
-    if not email or not site or pd.isna(email) or pd.isna(site):
+    if not nome_col or not sobrenome_col or pd.isna(row[nome_col]):
         return ''
-    try:
-        dominio_email = str(email).split('@')[1]
-        if not str(site).startswith(('http://', 'https://')):
-            site = 'https://' + str(site)
-        dominio_site = urlparse(site).netloc.replace('www.', '')
-
-        if dominio_email.lower() == dominio_site.lower():
-            return ''
-        else:
-            return 'Verificar E-mail'
-    except (IndexError, AttributeError):
-        return 'E-mail ou Site Inválido'
     
+    primeiro_nome = str(row[nome_col]).split()[0]
+    
+    sobrenome_completo = str(row[sobrenome_col])
+    conectivos = ['de', 'da', 'do', 'dos', 'das']
+    partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
+    
+    ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
+    
+    nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
+    return nome_final.title()
+
+def padronizar_nome_empresa(nome_empresa):
+    """Remove siglas e formata o nome da empresa, mantendo conectivos minúsculos."""
+    if pd.isna(nome_empresa): return ''
+    nome_limpo = str(nome_empresa)
+    siglas = [r'\sS/A', r'\sS\.A', r'\sSA\b', r'\sLTDA', r'\sLtda', r'\sME\b', r'\sEIRELI', r'\sEPP', r'\sMEI\b']
+    for sigla in siglas:
+        nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
+    
+    nome_limpo = nome_limpo.strip()
+    
+    def title_case_com_excecoes(s):
+        palavras = s.split()
+        conectivos = ['de', 'da', 'do', 'dos', 'das', 'e']
+        resultado = [palavras[0].capitalize()]
+        for palavra in palavras[1:]:
+            if palavra.lower() in conectivos:
+                resultado.append(palavra.lower())
+            else:
+                resultado.append(palavra.capitalize())
+        return ' '.join(resultado)
+
+    return title_case_com_excecoes(nome_limpo)
+
+def padronizar_site(site):
+    """Garante que o site comece com www e não tenha prefixos extras."""
+    if pd.isna(site) or str(site).strip() == '':
+        return ''
+    
+    site_limpo = str(site).strip()
+    # Remove http://, https:// e a barra final
+    site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
+    site_limpo = site_limpo.rstrip('/')
+
+    # Garante que comece com www. se não já começar
+    if not site_limpo.lower().startswith('www.'):
+        site_limpo = 'www.' + site_limpo
+        
+    return site_limpo
+
+# (O restante das funções de verificação permanecem as mesmas)
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
@@ -95,7 +127,7 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-def verificar_localidade(lead_row, locais_icp, df_columns):
+def verificar_localidade(lead_row, locais_icp):
     if isinstance(locais_icp, str): locais_icp = [locais_icp]
     if not locais_icp or any(loc.strip().lower() == 'brasil' for loc in locais_icp): return True
     regioes = {
@@ -104,10 +136,9 @@ def verificar_localidade(lead_row, locais_icp, df_columns):
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
-    cidade_lead = str(get_valor_flexivel(lead_row, ['Cidade_Contato', 'cidade'], df_columns) or '').strip().lower()
-    estado_lead = str(get_valor_flexivel(lead_row, ['Estado_Contato', 'estado', 'uf'], df_columns) or '').strip().lower()
-    pais_lead = str(get_valor_flexivel(lead_row, ['Pais_Contato', 'pais'], df_columns) or '').strip().lower()
-
+    cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
+    estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
+    pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
     for local_permitido in locais_icp:
         local_permitido_clean = local_permitido.lower().strip()
         if local_permitido_clean in regioes:
@@ -126,7 +157,7 @@ st.write("Faça o upload dos seus arquivos para qualificação e análise de lea
 arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
 arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
 
-if st.button("🚀 Iniciar Análise Inteligente"):
+if st.button("🚀 Iniciar Análise e Padronização"):
     if arquivo_dados and arquivo_icp:
         try:
             genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
@@ -142,42 +173,34 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'verificacao_email']:
+            # Inicializa colunas de resultado
+            for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
             
-            st.info("Iniciando processamento...")
+            st.info("Iniciando qualificação...")
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            df_cols = leads_df.columns
-            
             for index, lead in leads_df.iterrows():
-                status_text.text(f"Analisando: {get_valor_flexivel(lead, ['Nome_Empresa', 'nome da empresa'], df_cols) or f'Linha {index+2}'}...")
+                status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- VERIFICAÇÃO DE E-MAIL COM LEITURA FLEXÍVEL ---
-                email_lead = get_valor_flexivel(lead, ['Email_Lead', 'email', 'e-mail'], df_cols)
-                site_lead_original = get_valor_flexivel(lead, ['Site_Original', 'site', 'website'], df_cols)
-                leads_df.at[index, 'verificacao_email'] = verificar_dominio_email(email_lead, site_lead_original)
-
-                # Qualificação Local Rígida
-                if not verificar_funcionarios(get_valor_flexivel(lead, ['Numero_Funcionarios', 'funcionarios'], df_cols), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
+                if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
-                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []), df_cols):
+                if not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
-                if pd.notna(site_lead_original) and str(site_lead_original).strip() != '':
-                    if not str(site_lead_original).startswith(('http://', 'https://')):
-                        site_lead_original = 'https://' + str(site_lead_original)
-                    
-                    analise = analisar_icp_com_ia_por_url(site_lead_original, criterios_icp)
-                    
+                site_url = lead.get('Site_Original')
+                if pd.notna(site_url) and str(site_url).strip() != '':
+                    if not str(site_url).startswith(('http://', 'https://')):
+                        site_url = 'https://' + str(site_url)
+                    analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
                     if "error" not in analise:
                         leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
                         if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
@@ -193,13 +216,23 @@ if st.button("🚀 Iniciar Análise Inteligente"):
                 else:
                     leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
                     leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
-
+                
                 progress_bar.progress((index + 1) / len(leads_df))
             
+            status_text.info("Qualificação concluída! Iniciando padronização final dos dados...")
+            
+            # --- APLICAÇÃO DA PADRONIZAÇÃO ---
+            df_cols = leads_df.columns
+            leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
+            if 'Nome_Empresa' in df_cols:
+                leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
+            if 'Site_Original' in df_cols:
+                leads_df['site_padronizado'] = leads_df['Site_Original'].apply(padronizar_site)
+
             status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
+            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_processados_final.csv', mime='text/csv')
     else:
         st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
