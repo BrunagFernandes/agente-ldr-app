@@ -1,4 +1,4 @@
-# --- VERSÃO COM CORREÇÃO NO FILTRO DE FUNCIONÁRIOS ---
+# --- VERSÃO COM FILTRO DE LOCALIDADE REIMPLEMENTADO ---
 import streamlit as st
 import pandas as pd
 import io
@@ -63,14 +63,12 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
             funcionarios_num = float(funcionarios_str.replace('k', '')) * 1000
         else:
             funcionarios_num = pd.to_numeric(funcionarios_str)
-
         if pd.isna(funcionarios_num): return False
     except (ValueError, TypeError):
         return False
 
     faixa_str = str(faixa_icp_str).lower()
     numeros = [int(s) for s in re.findall(r'\d+', faixa_str)]
-
     if not numeros: return False
 
     if "acima" in faixa_str or "maior" in faixa_str:
@@ -82,6 +80,43 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1:
         return funcionarios_num >= numeros[0]
     
+    return False
+
+# --- NOVA FUNÇÃO DE LOCALIDADE ---
+def verificar_localidade(lead_row, locais_icp):
+    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
+    # Garante que sempre trabalhamos com uma lista, mesmo se o ICP tiver só um local
+    if isinstance(locais_icp, str):
+        locais_icp = [locais_icp]
+    
+    # Se a lista de locais for vazia ou conter 'brasil' em qualquer uma das strings, aprova todos
+    if not locais_icp or any('brasil' in loc.lower() for loc in locais_icp):
+        return True
+
+    regioes = {
+        'sudeste': ['sp', 'rj', 'es', 'mg'],
+        'sul': ['pr', 'sc', 'rs'],
+        'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
+        'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
+        'centro-oeste': ['ms', 'mt', 'go', 'df']
+    }
+
+    # Prepara os dados de localidade do lead
+    cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
+    estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
+    
+    # Verifica se o lead corresponde a QUALQUER UM dos locais permitidos
+    for local_permitido in locais_icp:
+        local_permitido_clean = local_permitido.lower().strip()
+        if local_permitido_clean in regioes:
+            if estado_lead in regioes[local_permitido_clean]:
+                return True 
+        else:
+            partes_requisito = [part.strip() for part in local_permitido_clean.split(',')]
+            lead_data_comparable = [cidade_lead, estado_lead]
+            if all(parte in lead_data_comparable for parte in partes_requisito):
+                return True
+
     return False
 
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
@@ -105,7 +140,8 @@ if st.button("🚀 Iniciar Análise Inteligente"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
+            # Lógica para ler multiplas linhas do mesmo campo (como localidade)
+            criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'cargo_valido']:
@@ -120,19 +156,25 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- QUALIFICAÇÃO LOCAL COM A CHAMADA CORRIGIDA ---
+                # --- QUALIFICAÇÃO LOCAL HIERÁRQUICA ---
                 
-                # O NOME DO CAMPO FOI CORRIGIDO AQUI:
                 funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead'))
-                
                 if not funcionarios_ok:
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
+                localidade_ok = verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', []))
+                if not localidade_ok:
+                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                    leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
+                    progress_bar.progress((index + 1) / len(leads_df))
+                    continue
+
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
 
+                # --- ANÁLISE COM IA ---
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
