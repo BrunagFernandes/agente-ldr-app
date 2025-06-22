@@ -1,4 +1,4 @@
-# --- VERSÃO COM CORREÇÃO DO NAMEERROR ---
+# --- VERSÃO COM ENRIQUECIMENTO DE SITE "SUPER-INTELIGENTE" ---
 import streamlit as st
 import pandas as pd
 import io
@@ -20,16 +20,29 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
+# --- FUNÇÃO DE ENRIQUECIMENTO DE SITE COM PROMPT APRIMORADO ---
 def enriquecer_site_com_ia(nome_empresa, cidade, estado):
+    """Pede para a IA encontrar o site oficial de uma empresa com uma estratégia de 3 etapas."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
-    Sua única tarefa é agir como um especialista em busca na web para encontrar a URL do site oficial da empresa chamada "{nome_empresa}", localizada aproximadamente em "{cidade}, {estado}".
-    REGRAS: FOCO TOTAL em encontrar o site principal (.com, .com.br). EVITE redes sociais ou diretórios.
-    Responda APENAS com a URL limpa (ex: www.empresa.com.br) ou com a palavra "N/A" se não encontrar.
+    Sua única tarefa é agir como um especialista em busca na web para encontrar a URL do site oficial da empresa abaixo.
+
+    - Nome da Empresa: "{nome_empresa}"
+    - Localização Aproximada: "{cidade}, {estado}"
+
+    **ESTRATÉGIA DE BUSCA E VERIFICAÇÃO (SIGA RIGOROSAMENTE):**
+    1.  **BUSCAR:** Realize uma busca na internet pelos termos: `"{nome_empresa} site oficial"` e `"{nome_empresa} institucional"`.
+    2.  **ANALISAR E FILTRAR:** Analise os principais resultados. Descarte agressivamente qualquer link que seja de redes sociais (LinkedIn, Facebook, etc.), mapas ou diretórios. Priorize domínios limpos (como www.empresa.com.br) em vez de subdomínios (como carreiras.empresa.com.br).
+    3.  **VALIDAR:** Pegue o link mais provável e verifique se o nome "{nome_empresa}" aparece claramente no título da página ou em seu rodapé para confirmar que é o site correto.
+    
+    **REGRAS DE RESPOSTA:**
+    - Se você encontrar e confirmar o site oficial seguindo a estratégia acima, responda **APENAS** com a URL limpa (ex: `www.empresa.com.br`).
+    - Se, após seguir todos os passos, você não tiver 100% de certeza, responda **APENAS** com a palavra `N/A`.
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
         site = response.text.strip()
+        # Validação final para garantir que a resposta é uma URL e não uma frase.
         if '.' in site and len(site) > 4 and ' ' not in site and site != "N/A":
             return site
         else:
@@ -52,42 +65,24 @@ def analisar_presenca_online(nome_empresa, cidade):
     except Exception as e:
         return {"error": "Falha na análise de presença online", "details": str(e)}
 
-def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    """Usa a IA para visitar a URL e fazer a análise completa do ICP."""
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
-    if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
-        info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
-    prompt = f"""
-    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
-    Critérios do ICP:
-    - {info_base_comparacao}
-    - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
-    Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
-    """
-    try:
-        response = model.generate_content(prompt, request_options={"timeout": 90})
-        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(resposta_texto)
-    except Exception as e:
-        return {"error": "Falha na análise da IA", "details": str(e)}
-
-def analisar_icp_com_ia_por_resumo(resumo_negocio, criterios_icp):
-    """Usa a IA para analisar um RESUMO DE NEGÓCIO."""
+def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
     
+    parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
+
     prompt = f"""
-    Você é um Analista de Leads Sênior. Analise o seguinte resumo de negócio: '{resumo_negocio}'.
+    Você é um Analista de Leads Sênior. {parte_analise}
     Compare o que você leu com os critérios do meu ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        response = model.generate_content(prompt, request_options={"timeout": 30})
+        timeout = 90 if is_url else 30
+        response = model.generate_content(prompt, request_options={"timeout": timeout})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
@@ -205,17 +200,14 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                 if pd.notna(site_para_analise) and str(site_para_analise).strip() != '' and site_para_analise != 'N/A':
                     if not str(site_para_analise).startswith(('http://', 'https://')):
                         site_para_analise = 'https://' + str(site_para_analise)
-                    
-                    # --- CHAMADA CORRIGIDA ---
-                    analise = analisar_icp_com_ia_por_url(site_para_analise, criterios_icp)
+                    analise = analisar_icp_com_ia(site_para_analise, criterios_icp)
                 else:
                     status_text.text(f"Nenhum site encontrado. Buscando presença online para {lead.get('Nome_Empresa')}...")
                     presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
                     if presenca_online and "error" not in presenca_online and presenca_online.get('is_ativa'):
                         resumo = presenca_online.get('resumo_negocio')
                         status_text.text(f"Presença online encontrada. Analisando resumo...")
-                        # --- CHAMADA CORRIGIDA ---
-                        analise = analisar_icp_com_ia_por_resumo(resumo, criterios_icp)
+                        analise = analisar_icp_com_ia(resumo, criterios_icp, is_url=False)
                         if analise and "error" not in analise:
                            analise['motivo_segmento'] = f"{analise.get('motivo_segmento')} (Baseado em resumo online: {presenca_online.get('fonte_informacao')})"
                     else:
@@ -223,7 +215,6 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                         leads_df.at[index, 'motivo_classificacao'] = 'Nenhuma informação conclusiva encontrada online'
 
                 if analise and "error" not in analise:
-                    leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
                     if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
                         leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
                         leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
@@ -231,6 +222,7 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                         leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                         motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
                         leads_df.at[index, 'motivo_classificacao'] = motivo
+                    leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
                 elif analise and "error" in analise:
                     leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
                     leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
