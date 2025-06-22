@@ -1,11 +1,11 @@
-# --- VERSÃO FINAL COM CORREÇÃO CIRÚRGICA DE LOCALIDADE ---
+# --- VERSÃO FINAL COM CORREÇÃO DE LOCALIDADE E CLASSIFICAÇÃO ---
 import streamlit as st
 import pandas as pd
 import io
 import json
 import re
-import google.generativeai as genai
 from urllib.parse import urlparse
+import google.generativeai as genai
 
 # --- FUNÇÕES DO AGENTE ---
 
@@ -22,20 +22,38 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
+def analisar_presenca_online(nome_empresa, cidade):
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    prompt = f"""
+    Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
+    AÇÕES: 1. Faça uma busca na internet, priorizando o perfil da empresa no LinkedIn. 2. Responda ao JSON abaixo.
+    REGRAS: Para 'ativa', procure por posts/notícias nos últimos 12 meses. Se não houver, considere 'inativa'.
+    Responda APENAS com um objeto JSON válido com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
+    """
+    try:
+        response = model.generate_content(prompt, request_options={"timeout": 60})
+        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(resposta_texto)
+    except Exception as e:
+        return {"error": "Falha na análise de presença online", "details": str(e)}
+
+def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
+    
+    parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
     prompt = f"""
-    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
-    Critérios do ICP:
+    Você é um Analista de Leads Sênior. {parte_analise}
+    Compare o que você leu com os critérios do meu ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        response = model.generate_content(prompt, request_options={"timeout": 90})
+        timeout = 90 if is_url else 30
+        response = model.generate_content(prompt, request_options={"timeout": timeout})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
@@ -51,28 +69,21 @@ def title_case_com_excecoes(s, excecoes):
             resultado.append(palavra.capitalize())
     return ' '.join(resultado)
 
-def padronizar_cidade(cidade):
-    if pd.isna(cidade): return ''
-    cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(cidade)).strip()
-    return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
-
-def padronizar_estado(estado):
-    if pd.isna(estado): return ''
-    estado_limpo = str(estado).strip().lower()
-    mapa_estados = {
-        'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 
-        'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 
-        'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 
-        'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 
-        'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
-    }
-    return mapa_estados.get(estado_limpo, title_case_com_excecoes(estado_limpo, ['de', 'do']))
-
-def padronizar_pais(pais):
-    if pd.isna(pais): return ''
-    pais_limpo = str(pais).strip().lower()
+def padronizar_localidade_geral(valor, tipo):
+    if pd.isna(valor): return ''
+    mapa_estados = {'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'}
     mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
-    return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
+    
+    if tipo == 'cidade':
+        cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
+        return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
+    elif tipo == 'estado':
+        estado_limpo = str(valor).strip().lower()
+        return mapa_estados.get(estado_limpo, title_case_com_excecoes(estado_limpo, ['de', 'do']))
+    elif tipo == 'pais':
+        pais_limpo = str(valor).strip().lower()
+        return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
+    return valor
 
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
@@ -140,16 +151,14 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-# --- FUNÇÃO DE LOCALIDADE COM A CORREÇÃO CIRÚRGICA ---
+# --- FUNÇÃO DE LOCALIDADE FINALMENTE CORRIGIDA ---
 def verificar_localidade(lead_row, locais_icp):
-    """Verifica se a localidade do lead atende a múltiplos critérios ou regiões."""
-    if not isinstance(locais_icp, list):
-        locais_icp = [locais_icp]
-    
-    if not locais_icp or pd.isna(locais_icp).all():
+    if not locais_icp or (isinstance(locais_icp, list) and not all(locais_icp)):
         return True
 
-    # CORREÇÃO: A regra de 'aprovar todos' só funciona se o ÚNICO critério for 'brasil'
+    if not isinstance(locais_icp, list):
+        locais_icp = [locais_icp]
+
     if len(locais_icp) == 1 and str(locais_icp[0]).strip().lower() == 'brasil':
         return True
 
@@ -159,7 +168,6 @@ def verificar_localidade(lead_row, locais_icp):
         'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
         'centro-oeste': ['ms', 'mt', 'go', 'df']
     }
-    
     cidade_lead = str(lead_row.get('Cidade_Contato', '')).strip().lower()
     estado_lead = str(lead_row.get('Estado_Contato', '')).strip().lower()
     pais_lead = str(lead_row.get('Pais_Contato', '')).strip().lower()
@@ -197,8 +205,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            # Voltando para a leitura estável do ICP, que funciona com o seu formato
-            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
+            criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
@@ -209,14 +216,16 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # --- LOOP DE PROCESSAMENTO COMPLETO ---
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
+                
+                # --- FLUXO DE QUALIFICAÇÃO E ANÁLISE RESTAURADO ---
+                analise = None
                 
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
-                elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', '')):
+                elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                 else:
@@ -224,40 +233,50 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                     if pd.notna(site_url) and str(site_url).strip() != '':
                         if not str(site_url).startswith(('http://', 'https://')):
                             site_url = 'https://' + str(site_url)
-                        analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
-                        if "error" not in analise:
-                            leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                            if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
-                                leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                                leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
-                            else:
-                                leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                                motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                                leads_df.at[index, 'motivo_classificacao'] = motivo
-                        else:
-                            leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                            leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                        analise = analisar_icp_com_ia(site_url, criterios_icp)
                     else:
-                        leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                        leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
+                        # Lógica de presença online para leads sem site
+                        status_text.text(f"Site não informado. Buscando presença online para {lead.get('Nome_Empresa')}...")
+                        presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
+                        if presenca_online and "error" not in presenca_online and presenca_online.get('is_ativa'):
+                            resumo = presenca_online.get('resumo_negocio')
+                            status_text.text(f"Presença online encontrada. Analisando resumo...")
+                            analise = analisar_icp_com_ia(resumo, criterios_icp, is_url=False)
+                            if analise and "error" not in analise:
+                               analise['motivo_segmento'] = f"{analise.get('motivo_segmento')} (Baseado em resumo online: {presenca_online.get('fonte_informacao')})"
+                        else:
+                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                            leads_df.at[index, 'motivo_classificacao'] = 'Nenhuma informação conclusiva encontrada online'
+
+                if analise and "error" not in analise:
+                    leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                    if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                        leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                        leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                        motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                        leads_df.at[index, 'motivo_classificacao'] = motivo
+                elif analise and "error" in analise:
+                    leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
+                    leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
 
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.info("Qualificação concluída! Iniciando padronização final dos dados...")
             
-            # --- APLICAÇÃO DA PADRONIZAÇÃO COMPLETA ---
             df_cols = list(leads_df.columns)
             leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
             
             col_map = {
                 'Nome_Empresa': ('nome_empresa_padronizado', padronizar_nome_empresa),
                 'Site_Original': ('site_padronizado', padronizar_site),
-                'Cidade_Contato': ('cidade_contato_padronizada', padronizar_cidade),
-                'Estado_Contato': ('estado_contato_padronizado', padronizar_estado),
-                'Pais_Contato': ('pais_contato_padronizado', padronizar_pais),
-                'Cidade_Empresa': ('cidade_empresa_padronizada', padronizar_cidade),
-                'Estado_Empresa': ('estado_empresa_padronizada', padronizar_estado),
-                'Pais_Empresa': ('pais_empresa_padronizada', padronizar_pais),
+                'Cidade_Contato': ('cidade_contato_padronizada', padronizar_localidade_geral, 'cidade'),
+                'Estado_Contato': ('estado_contato_padronizado', padronizar_localidade_geral, 'estado'),
+                'Pais_Contato': ('pais_contato_padronizado', padronizar_localidade_geral, 'pais'),
+                'Cidade_Empresa': ('cidade_empresa_padronizada', padronizar_localidade_geral, 'cidade'),
+                'Estado_Empresa': ('estado_empresa_padronizada', padronizar_localidade_geral, 'estado'),
+                'Pais_Empresa': ('pais_empresa_padronizada', padronizar_localidade_geral, 'pais'),
             }
 
             for col, (nova_col, func, *args) in col_map.items():
