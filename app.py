@@ -1,4 +1,4 @@
-# --- VERSÃO COM PADRONIZAÇÃO DE TELEFONE AVANÇADA ---
+# --- VERSÃO COM A LÓGICA DE ANÁLISE ONLINE RESTAURADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -7,7 +7,7 @@ import re
 from urllib.parse import urlparse
 import google.generativeai as genai
 
-# --- FUNÇÕES DO AGENTE ---
+# --- FUNÇÕES DO AGENTE (sem alterações) ---
 
 def ler_csv_flexivel(arquivo_upado):
     try:
@@ -22,64 +22,49 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
+def analisar_presenca_online(nome_empresa, cidade):
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    prompt = f"""
+    Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
+    AÇÕES: 1. Faça uma busca na internet, priorizando o perfil da empresa no LinkedIn. 2. Responda ao JSON abaixo.
+    REGRAS: Para 'ativa', procure por posts/notícias nos últimos 12 meses. Se não houver, considere 'inativa'.
+    Responda APENAS com um objeto JSON válido com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
+    """
+    try:
+        response = model.generate_content(prompt, request_options={"timeout": 60})
+        resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(resposta_texto)
+    except Exception as e:
+        return {"error": "Falha na análise de presença online", "details": str(e)}
+
+def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
+    
+    parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
     prompt = f"""
-    Você é um Analista de Leads Sênior. Visite a URL {url_do_lead} e responda em JSON.
-    Critérios do ICP:
+    Você é um Analista de Leads Sênior. {parte_analise}
+    Compare o que você leu com os critérios do meu ICP:
     - {info_base_comparacao}
     - Segmentos Válidos: [{criterios_icp.get('segmento_desejado_do_lead', 'N/A')}]
     Responda APENAS com um objeto JSON válido com as chaves: "is_concorrente", "motivo_concorrente", "is_segmento_correto", "motivo_segmento", "categoria_segmento".
     """
     try:
-        response = model.generate_content(prompt, request_options={"timeout": 90})
+        timeout = 90 if is_url else 30
+        response = model.generate_content(prompt, request_options={"timeout": timeout})
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# --- FUNÇÃO DE PADRONIZAÇÃO DE TELEFONE ATUALIZADA ---
-def padronizar_telefone(telefone):
-    """Filtra e formata um número de telefone para o padrão brasileiro."""
-    if pd.isna(telefone):
-        return ''
-    
-    # Limpa o número, mantendo apenas os dígitos
-    apenas_digitos = re.sub(r'\D', '', str(telefone))
-    
-    # REGRA DE REMOÇÃO: Ignora números 0800
-    if apenas_digitos.startswith('0800'):
-        return ''
-        
-    # Normalização: Remove o código do país (55) se ele estiver presente
-    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11:
-        apenas_digitos = apenas_digitos[2:]
-
-    # Normalização: Remove o '0' inicial de DDD, se houver
-    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
-        apenas_digitos = apenas_digitos[1:]
-
-    # REGRA DE REMOÇÃO: Se não for um número brasileiro válido (10 ou 11 dígitos), remove
-    if len(apenas_digitos) not in [10, 11]:
-        return '' # Remove números internacionais ou mal formatados
-
-    # Formatação para o padrão brasileiro
-    if len(apenas_digitos) == 11:  # Celular com 9
-        return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
-    elif len(apenas_digitos) == 10:  # Fixo ou Celular antigo
-        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
-    
-    return '' # Caso de segurança, retorna vazio se nada acima funcionar
-
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
     sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
-    if not nome_col or not sobrenome_col or pd.isna(row[nome_col]): return ''
+    if not nome_col or pd.isna(row[nome_col]): return ''
     primeiro_nome = str(row[nome_col]).split()[0]
-    sobrenome_completo = str(row[sobrenome_col])
+    sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
@@ -96,23 +81,30 @@ def padronizar_nome_empresa(nome_empresa):
     def title_case_com_excecoes(s):
         palavras = s.split()
         conectivos = ['de', 'da', 'do', 'dos', 'das', 'e']
-        resultado = [palavras[0].capitalize()]
-        for palavra in palavras[1:]:
-            if palavra.lower() in conectivos:
+        resultado = []
+        for i, palavra in enumerate(palavras):
+            if i > 0 and palavra.lower() in conectivos:
                 resultado.append(palavra.lower())
             else:
                 resultado.append(palavra.capitalize())
         return ' '.join(resultado)
     return title_case_com_excecoes(nome_limpo)
 
-def padronizar_site(site):
-    if pd.isna(site) or str(site).strip() == '': return ''
-    site_limpo = str(site).strip()
-    site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
-    site_limpo = site_limpo.rstrip('/')
-    if not site_limpo.lower().startswith('www.'):
-        site_limpo = 'www.' + site_limpo
-    return site_limpo
+def padronizar_telefone(telefone):
+    if pd.isna(telefone): return ''
+    apenas_digitos = re.sub(r'\D', '', str(telefone))
+    if apenas_digitos.startswith('0800'): return ''
+    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11:
+        apenas_digitos = apenas_digitos[2:]
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
+        apenas_digitos = apenas_digitos[1:]
+    if len(apenas_digitos) not in [10, 11]:
+        return ''
+    if len(apenas_digitos) == 11:
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10:
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+    return ''
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
@@ -186,6 +178,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
+            # Inicializa colunas de resultado
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -208,38 +201,50 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                     progress_bar.progress((index + 1) / len(leads_df))
                     continue
 
+                analise = None
                 site_url = lead.get('Site_Original')
+
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
                         site_url = 'https://' + str(site_url)
-                    analise = analisar_icp_com_ia_por_url(site_url, criterios_icp)
-                    if "error" not in analise:
-                        leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
-                        if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
-                            leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
-                            leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
-                        else:
-                            leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                            motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
-                            leads_df.at[index, 'motivo_classificacao'] = motivo
-                    else:
-                        leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
-                        leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+                    analise = analisar_icp_com_ia(site_url, criterios_icp)
                 else:
-                    leads_df.at[index, 'classificacao_icp'] = 'Ponto de Atenção'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Site não informado'
-                
+                    status_text.text(f"Site não informado. Buscando presença online para {lead.get('Nome_Empresa')}...")
+                    presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
+                    if presenca_online and "error" not in presenca_online and presenca_online.get('is_ativa'):
+                        resumo = presenca_online.get('resumo_negocio')
+                        status_text.text(f"Presença online encontrada. Analisando resumo...")
+                        analise = analisar_icp_com_ia(resumo, criterios_icp, is_url=False)
+                        if analise and "error" not in analise:
+                           analise['motivo_segmento'] = f"{analise.get('motivo_segmento')} (Baseado em resumo online: {presenca_online.get('fonte_informacao')})"
+                    elif presenca_online and not presenca_online.get('is_ativa'):
+                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                        leads_df.at[index, 'motivo_classificacao'] = f"Empresa parece inativa. Fonte: {presenca_online.get('fonte_informacao')}"
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                        leads_df.at[index, 'motivo_classificacao'] = 'Nenhuma informação conclusiva encontrada online'
+
+                if analise and "error" not in analise:
+                    leads_df.at[index, 'categoria_do_lead'] = analise.get('categoria_segmento', 'N/A')
+                    if analise.get('is_segmento_correto') and not analise.get('is_concorrente'):
+                        leads_df.at[index, 'classificacao_icp'] = 'Dentro do ICP'
+                        leads_df.at[index, 'motivo_classificacao'] = analise.get('motivo_segmento')
+                    else:
+                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                        motivo = f"Concorrente: {analise.get('is_concorrente')}" if analise.get('is_concorrente') else f"Segmento incorreto: {analise.get('motivo_segmento')}"
+                        leads_df.at[index, 'motivo_classificacao'] = motivo
+                elif analise and "error" in analise:
+                    leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
+                    leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
+
                 progress_bar.progress((index + 1) / len(leads_df))
             
             st.success("Qualificação concluída! Iniciando padronização final dos dados...")
             
-            # --- APLICAÇÃO DA PADRONIZAÇÃO ---
             df_cols = leads_df.columns
             leads_df['nome_completo_padronizado'] = leads_df.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
             if 'Nome_Empresa' in df_cols:
                 leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
-            if 'Site_Original' in df_cols:
-                leads_df['site_padronizado'] = leads_df['Site_Original'].apply(padronizar_site)
             if 'Telefone_Original' in df_cols:
                 leads_df['telefone_original_padronizado'] = leads_df['Telefone_Original'].apply(padronizar_telefone)
 
