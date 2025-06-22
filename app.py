@@ -1,4 +1,4 @@
-# --- VERSÃO COM ENRIQUECIMENTO EM CASCATA ---
+# --- VERSÃO COM CLASSIFICAÇÃO FINAL AJUSTADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -6,10 +6,9 @@ import json
 import re
 import google.generativeai as genai
 
-# --- FUNÇÕES DO AGENTE ---
+# --- FUNÇÕES DO AGENTE (sem alterações) ---
 
 def ler_csv_flexivel(arquivo_upado):
-    """Lê um arquivo CSV com separador flexível."""
     try:
         arquivo_upado.seek(0)
         df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
@@ -22,7 +21,6 @@ def ler_csv_flexivel(arquivo_upado):
         return None
 
 def enriquecer_site_com_ia(nome_empresa, cidade, estado):
-    """Pede para a IA encontrar o site oficial de uma empresa."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Sua única tarefa é encontrar a URL do site oficial da empresa chamada "{nome_empresa}", localizada aproximadamente em "{cidade}, {estado}".
@@ -40,7 +38,6 @@ def enriquecer_site_com_ia(nome_empresa, cidade, estado):
         return "N/A"
 
 def analisar_presenca_online(nome_empresa, cidade):
-    """Pede para a IA fazer uma busca geral pela empresa e verificar sua atividade."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
@@ -58,7 +55,6 @@ def analisar_presenca_online(nome_empresa, cidade):
         return {"error": "Falha na análise de presença online", "details": str(e)}
 
 def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
-    """Usa a IA para visitar a URL e fazer a análise completa do ICP."""
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
@@ -161,7 +157,7 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # Qualificação Local...
+                # Qualificação Local Rígida...
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
@@ -175,12 +171,10 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
 
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
                 
-                # --- LÓGICA DE ENRIQUECIMENTO E ANÁLISE EM CASCATA ---
-                
+                # Lógica de Enriquecimento e Análise em Cascata
                 site_url = lead.get('Site_Original')
                 site_para_analise = None
-
-                # Tenta usar o site original ou enriquecer um novo
+                
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     site_para_analise = site_url
                 else:
@@ -190,7 +184,6 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                         leads_df.at[index, 'site_enriquecido'] = site_enriquecido
                         site_para_analise = site_enriquecido
                 
-                # Se tivermos um site (original ou enriquecido), analisa
                 if site_para_analise:
                     if not str(site_para_analise).startswith(('http://', 'https://')):
                         site_para_analise = 'https://' + str(site_para_analise)
@@ -210,7 +203,7 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                         leads_df.at[index, 'classificacao_icp'] = 'Erro na Análise'
                         leads_df.at[index, 'motivo_classificacao'] = analise.get('details', 'Erro desconhecido da IA.')
                 else:
-                    # PLANO B: Se não temos site de forma alguma, busca presença online
+                    # PLANO B: BUSCA POR PRESENÇA ONLINE
                     status_text.text(f"Nenhum site encontrado. Buscando presença online para {lead.get('Nome_Empresa')}...")
                     presenca_online = analisar_presenca_online(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'))
                     if presenca_online and "error" not in presenca_online:
@@ -221,9 +214,10 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
                             leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                             leads_df.at[index, 'motivo_classificacao'] = f"Empresa parece inativa. Fonte: {presenca_online.get('fonte_informacao')}"
                     else:
-                        leads_df.at[index, 'classificacao_icp'] = 'Não Encontrado'
+                        # --- CLASSIFICAÇÃO AJUSTADA ---
+                        leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                         leads_df.at[index, 'motivo_classificacao'] = 'Nenhuma informação conclusiva encontrada online'
-                
+
                 progress_bar.progress((index + 1) / len(leads_df))
             
             status_text.success("Processamento completo!")
