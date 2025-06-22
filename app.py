@@ -1,4 +1,4 @@
-# --- VERSÃO COM FILTRO DE FUNCIONÁRIOS REFORÇADO E HIERARQUIA CORRETA ---
+# --- VERSÃO COM CORREÇÃO NO FILTRO DE FUNCIONÁRIOS ---
 import streamlit as st
 import pandas as pd
 import io
@@ -40,7 +40,7 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
-        return {"error": f"Falha na análise da IA: {e}", "details": str(e)}
+        return {"error": "Falha na análise da IA", "details": str(e)}
 
 def verificar_cargo(cargo_lead, cargos_icp_str):
     """Verifica se o cargo do lead está na lista de interesse do ICP."""
@@ -49,18 +49,14 @@ def verificar_cargo(cargo_lead, cargos_icp_str):
     cargos_de_interesse = [cargo.strip().lower() for cargo in str(cargos_icp_str).split(',')]
     return str(cargo_lead).strip().lower() in cargos_de_interesse
 
-# --- FUNÇÃO DE FUNCIONÁRIOS REFORÇADA ---
 def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     """Verifica se o número de funcionários do lead está na faixa do ICP."""
-    # Se o critério no ICP estiver vazio, aprova todos (não há filtro).
     if pd.isna(faixa_icp_str) or str(faixa_icp_str).strip() == '':
         return True
 
-    # Se o dado do lead estiver vazio, reprova.
     if pd.isna(funcionarios_lead):
         return False
         
-    # Converte o número de funcionários do lead para um número, tratando erros.
     try:
         funcionarios_str = str(funcionarios_lead).strip().lower().replace('.', '').replace(',', '')
         if 'k' in funcionarios_str:
@@ -75,7 +71,7 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     faixa_str = str(faixa_icp_str).lower()
     numeros = [int(s) for s in re.findall(r'\d+', faixa_str)]
 
-    if not numeros: return False # Se não extraiu números do critério, algo está errado.
+    if not numeros: return False
 
     if "acima" in faixa_str or "maior" in faixa_str:
         return funcionarios_num > numeros[0]
@@ -83,7 +79,7 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
         return funcionarios_num < numeros[0]
     elif "-" in faixa_str and len(numeros) == 2:
         return numeros[0] <= funcionarios_num <= numeros[1]
-    elif len(numeros) == 1: # Se for apenas um número, considera como valor mínimo
+    elif len(numeros) == 1:
         return funcionarios_num >= numeros[0]
     
     return False
@@ -124,20 +120,19 @@ if st.button("🚀 Iniciar Análise Inteligente"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- NOVA LÓGICA DE QUALIFICAÇÃO HIERÁRQUICA ---
-
-                # 1. Filtro RÍGIDO por funcionários. Se não passar, desqualifica e pula para o próximo.
-                funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_do_lead'))
+                # --- QUALIFICAÇÃO LOCAL COM A CHAMADA CORRIGIDA ---
+                
+                # O NOME DO CAMPO FOI CORRIGIDO AQUI:
+                funcionarios_ok = verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead'))
+                
                 if not funcionarios_ok:
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
                     progress_bar.progress((index + 1) / len(leads_df))
-                    continue # Pula para o próximo lead
+                    continue
 
-                # 2. Filtro SUAVE por cargo. Apenas anota o resultado.
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
 
-                # 3. Análise com IA (só roda se passou no filtro de funcionários)
                 site_url = lead.get('Site_Original')
                 if pd.notna(site_url) and str(site_url).strip() != '':
                     if not str(site_url).startswith(('http://', 'https://')):
