@@ -1,4 +1,4 @@
-# --- VERSÃO QUE PREENCHE A COLUNA ORIGINAL DO SITE ---
+# --- VERSÃO COM CORREÇÃO NO FLUXO DE ENRIQUECIMENTO ---
 import streamlit as st
 import pandas as pd
 import io
@@ -41,9 +41,7 @@ def analisar_presenca_online(nome_empresa, cidade):
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
-    AÇÕES:
-    1. Faça uma busca na internet. Dê prioridade a encontrar o perfil da empresa no LinkedIn.
-    2. Com base no que encontrar, responda às perguntas abaixo.
+    AÇÕES: 1. Faça uma busca na internet, priorizando o perfil da empresa no LinkedIn. 2. Responda às perguntas abaixo.
     REGRAS: Para 'ativa', procure por posts/notícias nos últimos 12 meses. Se não houver, considere 'inativa'.
     Responda APENAS com um objeto JSON válido com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
     """
@@ -145,11 +143,9 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # Garante que a coluna 'Site_Original' exista
             if 'Site_Original' not in leads_df.columns:
                 leads_df['Site_Original'] = ''
             
-            # Inicializa as outras colunas de resultado
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead', 'cargo_valido']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -176,18 +172,18 @@ if st.button("🚀 Iniciar Análise e Enriquecimento"):
 
                 leads_df.at[index, 'cargo_valido'] = verificar_cargo(lead.get('Cargo'), criterios_icp.get('cargos_de_interesse_do_lead'))
                 
-                # --- LÓGICA DE ENRIQUECIMENTO E ANÁLISE ---
-                site_para_analise = lead.get('Site_Original')
+                # --- LÓGICA DE ENRIQUECIMENTO E ANÁLISE CORRIGIDA ---
                 
+                site_para_analise = lead.get('Site_Original')
+
                 if pd.isna(site_para_analise) or str(site_para_analise).strip() == '':
                     status_text.text(f"Site não informado. Enriquecendo para {lead.get('Nome_Empresa')}...")
                     site_enriquecido = enriquecer_site_com_ia(lead.get('Nome_Empresa'), lead.get('Cidade_Empresa'), lead.get('Estado_Empresa'))
                     if site_enriquecido != "N/A":
-                        # --- ALTERAÇÃO PRINCIPAL ---
-                        # Preenche a coluna original e atualiza a variável para análise
+                        # Salva na coluna original e atualiza a variável para análise
                         leads_df.at[index, 'Site_Original'] = site_enriquecido
                         site_para_analise = site_enriquecido
-                
+
                 if pd.notna(site_para_analise) and str(site_para_analise).strip() != '' and site_para_analise != 'N/A':
                     if not str(site_para_analise).startswith(('http://', 'https://')):
                         site_para_analise = 'https://' + str(site_para_analise)
