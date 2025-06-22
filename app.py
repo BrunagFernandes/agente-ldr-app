@@ -1,4 +1,4 @@
-# --- VERSÃO COM PADRONIZAÇÃO FINAL DE DADOS ---
+# --- VERSÃO COM PADRONIZAÇÃO DE TELEFONE AVANÇADA ---
 import streamlit as st
 import pandas as pd
 import io
@@ -41,36 +41,58 @@ def analisar_icp_com_ia_por_url(url_do_lead, criterios_icp):
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
-# --- NOVAS FUNÇÕES DE PADRONIZAÇÃO ---
-def padronizar_nome_contato(row, df_columns):
-    """Junta o primeiro nome com o último sobrenome, ignorando conectivos."""
-    nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
-    sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
-
-    if not nome_col or not sobrenome_col or pd.isna(row[nome_col]):
+# --- FUNÇÃO DE PADRONIZAÇÃO DE TELEFONE ATUALIZADA ---
+def padronizar_telefone(telefone):
+    """Filtra e formata um número de telefone para o padrão brasileiro."""
+    if pd.isna(telefone):
         return ''
     
-    primeiro_nome = str(row[nome_col]).split()[0]
+    # Limpa o número, mantendo apenas os dígitos
+    apenas_digitos = re.sub(r'\D', '', str(telefone))
     
+    # REGRA DE REMOÇÃO: Ignora números 0800
+    if apenas_digitos.startswith('0800'):
+        return ''
+        
+    # Normalização: Remove o código do país (55) se ele estiver presente
+    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11:
+        apenas_digitos = apenas_digitos[2:]
+
+    # Normalização: Remove o '0' inicial de DDD, se houver
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
+        apenas_digitos = apenas_digitos[1:]
+
+    # REGRA DE REMOÇÃO: Se não for um número brasileiro válido (10 ou 11 dígitos), remove
+    if len(apenas_digitos) not in [10, 11]:
+        return '' # Remove números internacionais ou mal formatados
+
+    # Formatação para o padrão brasileiro
+    if len(apenas_digitos) == 11:  # Celular com 9
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10:  # Fixo ou Celular antigo
+        return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+    
+    return '' # Caso de segurança, retorna vazio se nada acima funcionar
+
+def padronizar_nome_contato(row, df_columns):
+    nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
+    sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
+    if not nome_col or not sobrenome_col or pd.isna(row[nome_col]): return ''
+    primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row[sobrenome_col])
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
-    
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
-    
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
 
 def padronizar_nome_empresa(nome_empresa):
-    """Remove siglas e formata o nome da empresa, mantendo conectivos minúsculos."""
     if pd.isna(nome_empresa): return ''
     nome_limpo = str(nome_empresa)
     siglas = [r'\sS/A', r'\sS\.A', r'\sSA\b', r'\sLTDA', r'\sLtda', r'\sME\b', r'\sEIRELI', r'\sEPP', r'\sMEI\b']
     for sigla in siglas:
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
-    
     nome_limpo = nome_limpo.strip()
-    
     def title_case_com_excecoes(s):
         palavras = s.split()
         conectivos = ['de', 'da', 'do', 'dos', 'das', 'e']
@@ -81,26 +103,17 @@ def padronizar_nome_empresa(nome_empresa):
             else:
                 resultado.append(palavra.capitalize())
         return ' '.join(resultado)
-
     return title_case_com_excecoes(nome_limpo)
 
 def padronizar_site(site):
-    """Garante que o site comece com www e não tenha prefixos extras."""
-    if pd.isna(site) or str(site).strip() == '':
-        return ''
-    
+    if pd.isna(site) or str(site).strip() == '': return ''
     site_limpo = str(site).strip()
-    # Remove http://, https:// e a barra final
     site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
     site_limpo = site_limpo.rstrip('/')
-
-    # Garante que comece com www. se não já começar
     if not site_limpo.lower().startswith('www.'):
         site_limpo = 'www.' + site_limpo
-        
     return site_limpo
 
-# (O restante das funções de verificação permanecem as mesmas)
 def verificar_cargo(cargo_lead, cargos_icp_str):
     if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
     if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
@@ -152,7 +165,7 @@ def verificar_localidade(lead_row, locais_icp):
 # --- INTERFACE DO APLICATIVO (STREAMLIT) ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
 st.title("🤖 Agente LDR com Inteligência Artificial")
-st.write("Faça o upload dos seus arquivos para qualificação e análise de leads.")
+st.write("Faça o upload dos seus arquivos para qualificação e padronização de leads.")
 
 arquivo_dados = st.file_uploader("1. Selecione o arquivo de DADOS (.csv)", type="csv")
 arquivo_icp = st.file_uploader("2. Selecione o arquivo de ICP (.csv)", type="csv")
@@ -173,7 +186,6 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
-            # Inicializa colunas de resultado
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
                 if col not in leads_df.columns:
                     leads_df[col] = ''
@@ -219,7 +231,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                 
                 progress_bar.progress((index + 1) / len(leads_df))
             
-            status_text.info("Qualificação concluída! Iniciando padronização final dos dados...")
+            st.success("Qualificação concluída! Iniciando padronização final dos dados...")
             
             # --- APLICAÇÃO DA PADRONIZAÇÃO ---
             df_cols = leads_df.columns
@@ -228,11 +240,13 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                 leads_df['nome_empresa_padronizado'] = leads_df['Nome_Empresa'].apply(padronizar_nome_empresa)
             if 'Site_Original' in df_cols:
                 leads_df['site_padronizado'] = leads_df['Site_Original'].apply(padronizar_site)
+            if 'Telefone_Original' in df_cols:
+                leads_df['telefone_original_padronizado'] = leads_df['Telefone_Original'].apply(padronizar_telefone)
 
             status_text.success("Processamento completo!")
             st.dataframe(leads_df)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_processados_final.csv', mime='text/csv')
+            st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
     else:
         st.warning("Por favor, faça o upload dos dois arquivos CSV para continuar.")
