@@ -1,10 +1,11 @@
-# --- VERSÃO ESTÁVEL COM FILTRO DE LOCALIDADE DESATIVADO ---
+# --- VERSÃO COM CONTROLE DE TAXA DE REQUISIÇÕES (RPM) ---
 import streamlit as st
 import pandas as pd
 import io
 import json
 import re
 import unicodedata
+import time # Importa a biblioteca de tempo
 import google.generativeai as genai
 from urllib.parse import urlparse
 
@@ -33,6 +34,7 @@ def analisar_presenca_online(nome_empresa, cidade):
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
+        time.sleep(1.1) # PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
@@ -56,11 +58,13 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     try:
         timeout = 90 if is_url else 30
         response = model.generate_content(prompt, request_options={"timeout": timeout})
+        time.sleep(1.1) # PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
+# (O restante das funções de padronização e verificação permanecem as mesmas)
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
     sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
@@ -126,12 +130,6 @@ def padronizar_localidade_geral(valor, tipo):
         return mapa_paises.get(pais_limpo, pais_limpo.capitalize())
     return valor
 
-def verificar_cargo(cargo_lead, cargos_icp_str):
-    if pd.isna(cargos_icp_str) or str(cargos_icp_str).strip() == '': return True
-    if pd.isna(cargo_lead) or str(cargo_lead).strip() == '': return False
-    cargos_de_interesse = [cargo.strip().lower() for cargo in str(cargos_icp_str).split(',')]
-    return str(cargo_lead).strip().lower() in cargos_de_interesse
-
 def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     if pd.isna(faixa_icp_str) or str(faixa_icp_str).strip() == '': return True
     if pd.isna(funcionarios_lead): return False
@@ -150,46 +148,6 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif "abaixo" in faixa_str or "menor" in faixa_str: return funcionarios_num < numeros[0]
     elif "-" in faixa_str and len(numeros) == 2: return numeros[0] <= funcionarios_num <= numeros[1]
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
-    return False
-
-def verificar_localidade(lead_row, locais_icp):
-    """
-    Verifica se a localidade do lead atende a múltiplos critérios ou regiões, 
-    de forma flexível, insensível a acentos, maiúsculas/minúsculas e siglas.
-    """
-    def _normalizar(texto):
-        if pd.isna(texto): return ""
-        s = str(texto).lower().strip()
-        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-
-    if not isinstance(locais_icp, list):
-        locais_icp = [locais_icp]
-    
-    if not locais_icp or pd.isna(locais_icp).all():
-        return True
-        
-    if len(locais_icp) == 1 and _normalizar(locais_icp[0]) == 'brasil':
-        return True
-
-    mapa_estados = {'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 'mato grosso do sul': 'ms', 'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr', 'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'}
-    mapa_siglas = {v: k for k, v in mapa_estados.items()}
-    regioes = {'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'], 'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'], 'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'], 'centro-oeste': ['ms', 'mt', 'go', 'df']}
-
-    cidade_lead = _normalizar(lead_row.get('Cidade_Contato', ''))
-    estado_lead = _normalizar(lead_row.get('Estado_Contato', ''))
-    estado_lead_sigla = mapa_estados.get(estado_lead, estado_lead)
-    estado_lead_nome_completo = mapa_siglas.get(estado_lead_sigla, estado_lead_sigla)
-
-    locais_possiveis_lead = {cidade_lead, estado_lead_sigla, estado_lead_nome_completo}
-    locais_possiveis_lead.discard('')
-    
-    for local_permitido in locais_icp:
-        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
-        partes_requisito.discard('brasil')
-        partes_requisito.discard('')
-        if partes_requisito.issubset(locais_possiveis_lead):
-            return True
-            
     return False
 
 # --- INTERFACE DO APLICATIVO ---
@@ -229,13 +187,9 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                 
                 analise = None
                 
-                # --- ALTERAÇÃO PRINCIPAL: FILTRO DE LOCALIDADE DESATIVADO ---
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
-                # elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
-                #     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                #     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                 else:
                     site_url = lead.get('Site_Original')
                     if pd.notna(site_url) and str(site_url).strip() != '':
