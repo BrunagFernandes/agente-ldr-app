@@ -171,7 +171,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
         icp_raw_df = ler_csv_flexivel(arquivo_icp)
 
         if leads_df is not None and icp_raw_df is not None:
-            criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
+            criterios_icp_raw = icp_raw_df.groupby('Campo_ICP')['Valor_ICP'].apply(lambda x: list(x) if len(x) > 1 else x.iloc[0]).to_dict()
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
             
             for col in ['classificacao_icp', 'motivo_classificacao', 'categoria_do_lead']:
