@@ -1,4 +1,4 @@
-# --- VERSÃO FINAL E ESTÁVEL ---
+# --- VERSÃO ESTÁVEL COM FILTRO DE LOCALIDADE DESATIVADO ---
 import streamlit as st
 import pandas as pd
 import io
@@ -152,43 +152,16 @@ def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
     elif len(numeros) == 1: return funcionarios_num >= numeros[0]
     return False
 
-# --- FUNÇÃO DE APOIO E FUNÇÃO DE LOCALIDADE CORRIGIDAS ---
-def normalizar_texto(texto):
-    if pd.isna(texto): return ""
-    s = str(texto).lower().strip()
-    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-    return s
-
 def verificar_localidade(lead_row, locais_icp):
     """
     Verifica se a localidade do lead atende a múltiplos critérios ou regiões, 
     de forma flexível, insensível a acentos, maiúsculas/minúsculas e siglas.
     """
-    # Helper function interna para evitar NameError e garantir consistência
     def _normalizar(texto):
         if pd.isna(texto): return ""
         s = str(texto).lower().strip()
         return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
-    # Dicionários de mapeamento
-    mapa_estados = {
-        'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 
-        'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 
-        'mato grosso do sul': 'ms', 'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr', 
-        'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 
-        'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 
-        'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
-    }
-    mapa_siglas = {v: k for k, v in mapa_estados.items()}
-    
-    regioes = {
-        'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
-        'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
-        'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'],
-        'centro-oeste': ['ms', 'mt', 'go', 'df']
-    }
-
-    # Tratamento da regra do ICP
     if not isinstance(locais_icp, list):
         locais_icp = [locais_icp]
     
@@ -198,36 +171,26 @@ def verificar_localidade(lead_row, locais_icp):
     if len(locais_icp) == 1 and _normalizar(locais_icp[0]) == 'brasil':
         return True
 
-    # 1. Normaliza os dados do lead
+    mapa_estados = {'acre': 'ac', 'alagoas': 'al', 'amapa': 'ap', 'amazonas': 'am', 'bahia': 'ba', 'ceara': 'ce', 'distrito federal': 'df', 'espirito santo': 'es', 'goias': 'go', 'maranhao': 'ma', 'mato grosso': 'mt', 'mato grosso do sul': 'ms', 'minas gerais': 'mg', 'para': 'pa', 'paraiba': 'pb', 'parana': 'pr', 'pernambuco': 'pe', 'piaui': 'pi', 'rio de janeiro': 'rj', 'rio grande do norte': 'rn', 'rio grande do sul': 'rs', 'rondonia': 'ro', 'roraima': 'rr', 'santa catarina': 'sc', 'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'}
+    mapa_siglas = {v: k for k, v in mapa_estados.items()}
+    regioes = {'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'], 'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'], 'norte': ['ro', 'ac', 'am', 'rr', 'pa', 'ap', 'to'], 'centro-oeste': ['ms', 'mt', 'go', 'df']}
+
     cidade_lead = _normalizar(lead_row.get('Cidade_Contato', ''))
     estado_lead = _normalizar(lead_row.get('Estado_Contato', ''))
-    
-    # 2. Cria um conjunto com todas as representações possíveis da localidade do lead
     estado_lead_sigla = mapa_estados.get(estado_lead, estado_lead)
-    estado_lead_nome_completo = mapa_siglas.get(estado_lead_sigla, estado_lead_sigla) # <-- CORREÇÃO ESTAVA AQUI
+    estado_lead_nome_completo = mapa_siglas.get(estado_lead_sigla, estado_lead_sigla)
 
     locais_possiveis_lead = {cidade_lead, estado_lead_sigla, estado_lead_nome_completo}
     locais_possiveis_lead.discard('')
     
-    # 3. Loop de verificação
-    for local_permitido_icp in locais_icp:
-        regra_normalizada = _normalizar(local_permitido_icp)
-        
-        if regra_normalizada in regioes:
-            if estado_lead_sigla in regioes[regra_normalizada]:
-                return True
-            continue
-
-        # Se a regra for um local específico (Cidade, Estado, etc.)
-        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido_icp).split(',')}
+    for local_permitido in locais_icp:
+        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
         partes_requisito.discard('brasil')
         partes_requisito.discard('')
-
-        # VERIFICAÇÃO FINAL: Todas as partes da regra do ICP estão contidas nos locais possíveis do lead?
         if partes_requisito.issubset(locais_possiveis_lead):
-            return True # Encontrou uma regra correspondente
+            return True
             
-    return False # Nenhuma regra do ICP correspondeu ao lead
+    return False
 
 # --- INTERFACE DO APLICATIVO ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
@@ -264,15 +227,15 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             for index, lead in leads_df.iterrows():
                 status_text.text(f"Analisando: {lead.get('Nome_Empresa', f'Linha {index+2}')}...")
                 
-                # --- FLUXO DE QUALIFICAÇÃO E ANÁLISE COMPLETO E CORRIGIDO ---
                 analise = None
                 
+                # --- ALTERAÇÃO PRINCIPAL: FILTRO DE LOCALIDADE DESATIVADO ---
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
-                elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
-                    leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                    leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
+                # elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
+                #     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
+                #     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                 else:
                     site_url = lead.get('Site_Original')
                     if pd.notna(site_url) and str(site_url).strip() != '':
