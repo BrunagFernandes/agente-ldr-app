@@ -180,6 +180,7 @@ def verificar_localidade(lead_row, locais_icp):
         'sao paulo': 'sp', 'sergipe': 'se', 'tocantins': 'to'
     }
     mapa_siglas = {v: k for k, v in mapa_estados.items()}
+    
     regioes = {
         'sudeste': ['sp', 'rj', 'es', 'mg'], 'sul': ['pr', 'sc', 'rs'],
         'nordeste': ['ba', 'se', 'al', 'pe', 'pb', 'rn', 'ce', 'pi', 'ma'],
@@ -209,21 +210,24 @@ def verificar_localidade(lead_row, locais_icp):
     locais_possiveis_lead.discard('')
     
     # 3. Loop de verificação
-    for local_permitido in locais_icp:
-        regra_normalizada = _normalizar(local_permitido)
+    for local_permitido_icp in locais_icp:
+        regra_normalizada = _normalizar(local_permitido_icp)
         
         if regra_normalizada in regioes:
             if estado_lead_sigla in regioes[regra_normalizada]:
                 return True
-        else:
-            partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido).split(',')}
-            partes_requisito.discard('brasil')
-            partes_requisito.discard('')
+            continue
 
-            if partes_requisito.issubset(locais_possiveis_lead):
-                return True
-                
-    return False
+        # Se a regra for um local específico (Cidade, Estado, etc.)
+        partes_requisito = {_normalizar(part.strip()) for part in str(local_permitido_icp).split(',')}
+        partes_requisito.discard('brasil')
+        partes_requisito.discard('')
+
+        # VERIFICAÇÃO FINAL: Todas as partes da regra do ICP estão contidas nos locais possíveis do lead?
+        if partes_requisito.issubset(locais_possiveis_lead):
+            return True # Encontrou uma regra correspondente
+            
+    return False # Nenhuma regra do ICP correspondeu ao lead
 
 # --- INTERFACE DO APLICATIVO ---
 st.set_page_config(layout="wide", page_title="Agente LDR de IA")
