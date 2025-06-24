@@ -1,11 +1,11 @@
-# --- VERSÃO ESTÁVEL COM CORREÇÃO DE LEITURA DE ARQUIVO E LOCALIDADE DESATIVADA ---
+# --- VERSÃO FINAL E ESTÁVEL COM TEMPORIZADOR ---
 import streamlit as st
 import pandas as pd
 import io
 import json
 import re
 import unicodedata
-import time
+import time # <--- ADICIONADO
 import google.generativeai as genai
 from urllib.parse import urlparse
 
@@ -15,29 +15,21 @@ def ler_csv_flexivel(arquivo_upado, separador_forçado=None):
     """Lê um arquivo CSV tentando diferentes separadores, com opção de forçar um."""
     try:
         arquivo_upado.seek(0)
-        # Se um separador foi forçado, usa ele primeiro.
         if separador_forçado:
             df = pd.read_csv(arquivo_upado, sep=separador_forçado, encoding='utf-8', on_bad_lines='skip')
-            df.columns = df.columns.str.strip()
-            return df
-
-        # Lógica flexível original
-        df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
-        if df.shape[1] > 1:
-            df.columns = df.columns.str.strip()
-            return df
+        else:
+            df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip')
+            if df.shape[1] == 1:
+                arquivo_upado.seek(0)
+                df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
         
-        arquivo_upado.seek(0)
-        df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip')
         df.columns = df.columns.str.strip()
         return df
-
     except Exception as e:
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
 def analisar_presenca_online(nome_empresa, cidade):
-    # (Esta função permanece a mesma)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     prompt = f"""
     Você é um detetive de negócios online. Investigue a empresa '{nome_empresa}' de '{cidade}'.
@@ -47,19 +39,20 @@ def analisar_presenca_online(nome_empresa, cidade):
     """
     try:
         response = model.generate_content(prompt, request_options={"timeout": 60})
-        time.sleep(1.1)
+        time.sleep(1.2) # <--- PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise de presença online", "details": str(e)}
 
 def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
-    # (Esta função permanece a mesma)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
     info_base_comparacao = f"O site da minha empresa é: {criterios_icp.get('site_da_empresa_contratante', 'Não informado')}"
     if '[INSIRA' in str(criterios_icp.get('site_da_empresa_contratante', '')):
         info_base_comparacao = f"A minha empresa é descrita como: '{criterios_icp.get('descricao_da_empresa_contratante', 'Não informado')}'"
+    
     parte_analise = f"Visite a URL {texto_ou_url} e analise seu conteúdo." if is_url else f"Analise o seguinte resumo de negócio: '{texto_ou_url}'."
+
     prompt = f"""
     Você é um Analista de Leads Sênior. {parte_analise}
     Compare o que você leu com os critérios do meu ICP:
@@ -70,14 +63,13 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     try:
         timeout = 90 if is_url else 30
         response = model.generate_content(prompt, request_options={"timeout": timeout})
-        time.sleep(1.1)
+        time.sleep(1.2) # <--- PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
         return {"error": "Falha na análise da IA", "details": str(e)}
 
 def padronizar_nome_contato(row, df_columns):
-    # (Esta função permanece a mesma)
     nome_col = next((col for col in df_columns if col.strip().lower() == 'nome_lead'), None)
     sobrenome_col = next((col for col in df_columns if col.strip().lower() == 'sobrenome_lead'), None)
     if not nome_col or pd.isna(row[nome_col]): return ''
@@ -90,7 +82,6 @@ def padronizar_nome_contato(row, df_columns):
     return nome_final.title()
 
 def title_case_com_excecoes(s, excecoes):
-    # (Esta função permanece a mesma)
     palavras = str(s).split()
     resultado = []
     for i, palavra in enumerate(palavras):
@@ -101,7 +92,6 @@ def title_case_com_excecoes(s, excecoes):
     return ' '.join(resultado)
 
 def padronizar_nome_empresa(nome_empresa):
-    # (Esta função permanece a mesma)
     if pd.isna(nome_empresa): return ''
     nome_limpo = str(nome_empresa)
     siglas = [r'\sS/A', r'\sS\.A', r'\sSA\b', r'\sLTDA', r'\sLtda', r'\sME\b', r'\sEIRELI', r'\sEPP', r'\sMEI\b']
@@ -110,7 +100,6 @@ def padronizar_nome_empresa(nome_empresa):
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
 
 def padronizar_site(site):
-    # (Esta função permanece a mesma)
     if pd.isna(site) or str(site).strip() == '': return ''
     site_limpo = str(site).strip()
     site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
@@ -120,7 +109,6 @@ def padronizar_site(site):
     return site_limpo
     
 def padronizar_telefone(telefone):
-    # (Esta função permanece a mesma)
     if pd.isna(telefone): return ''
     apenas_digitos = re.sub(r'\D', '', str(telefone))
     if apenas_digitos.startswith('0800'): return ''
@@ -132,7 +120,6 @@ def padronizar_telefone(telefone):
     return ''
 
 def padronizar_localidade_geral(valor, tipo):
-    # (Esta função permanece a mesma)
     if pd.isna(valor): return ''
     if tipo == 'cidade':
         cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
@@ -148,7 +135,6 @@ def padronizar_localidade_geral(valor, tipo):
     return valor
 
 def verificar_funcionarios(funcionarios_lead, faixa_icp_str):
-    # (Esta função permanece a mesma)
     if pd.isna(faixa_icp_str) or str(faixa_icp_str).strip() == '': return True
     if pd.isna(funcionarios_lead): return False
     try:
@@ -186,14 +172,13 @@ if st.button("🚀 Iniciar Análise e Padronização"):
         
         st.info("Lendo arquivos...")
         leads_df = ler_csv_flexivel(arquivo_dados)
-        # --- CORREÇÃO DO KEYERROR: Forçando o separador do ICP para vírgula ---
         icp_raw_df = ler_csv_flexivel(arquivo_icp, separador_forçado=',')
 
         if leads_df is not None and icp_raw_df is not None:
             try:
                 criterios_icp_raw = dict(zip(icp_raw_df['Campo_ICP'], icp_raw_df['Valor_ICP']))
             except KeyError:
-                st.error("Erro: O arquivo de ICP deve conter as colunas 'Campo_ICP' e 'Valor_ICP'. Verifique se o arquivo está no formato CSV com vírgulas como separador.")
+                st.error("Erro: O arquivo de ICP deve conter as colunas 'Campo_ICP' e 'Valor_ICP'.")
                 st.stop()
 
             criterios_icp = {str(k).lower().strip(): v for k, v in criterios_icp_raw.items()}
@@ -211,13 +196,9 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                 
                 analise = None
                 
-                # --- FLUXO DE QUALIFICAÇÃO COM LOCALIDADE DESATIVADA ---
                 if not verificar_funcionarios(lead.get('Numero_Funcionarios'), criterios_icp.get('numero_de_funcionarios_desejado_do_lead')):
                     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
                     leads_df.at[index, 'motivo_classificacao'] = 'Porte da empresa fora do perfil'
-                # elif not verificar_localidade(lead, criterios_icp.get('localidade_especifica_do_lead', [])):
-                #     leads_df.at[index, 'classificacao_icp'] = 'Fora do ICP'
-                #     leads_df.at[index, 'motivo_classificacao'] = 'Localidade fora do perfil'
                 else:
                     site_url = lead.get('Site_Original')
                     if pd.notna(site_url) and str(site_url).strip() != '':
@@ -280,7 +261,11 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                     leads_df[f'{col}_padronizado'] = leads_df[col].apply(padronizar_telefone)
 
             status_text.success("Processamento completo!")
-            #st.dataframe(leads_df)
+            
+            leads_df_display = leads_df.astype(str)
+            
+            # Removido para evitar erro com arquivos grandes
+            # st.dataframe(leads_df_display)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
