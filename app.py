@@ -280,7 +280,7 @@ if st.button("🚀 Iniciar Análise e Padronização"):
                     leads_df[f'{col}_padronizado'] = leads_df[col].apply(padronizar_telefone)
 
             status_text.success("Processamento completo!")
-            st.dataframe(leads_df)
+            #st.dataframe(leads_df)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button(label="⬇️ Baixar resultado completo (.csv)", data=csv, file_name='leads_analisados_final.csv', mime='text/csv')
