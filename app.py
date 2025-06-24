@@ -5,7 +5,7 @@ import io
 import json
 import re
 import unicodedata
-import time # <--- ADICIONADO
+import time # <--- IMPORT ADICIONADO
 import google.generativeai as genai
 from urllib.parse import urlparse
 
@@ -38,8 +38,8 @@ def analisar_presenca_online(nome_empresa, cidade):
     Responda APENAS com um objeto JSON válido com as chaves: "resumo_negocio", "is_ativa", "fonte_informacao".
     """
     try:
+        time.sleep(1.2) # PAUSA DE SEGURANÇA
         response = model.generate_content(prompt, request_options={"timeout": 60})
-        time.sleep(1.2) # <--- PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
@@ -62,8 +62,8 @@ def analisar_icp_com_ia(texto_ou_url, criterios_icp, is_url=True):
     """
     try:
         timeout = 90 if is_url else 30
+        time.sleep(1.2) # PAUSA DE SEGURANÇA
         response = model.generate_content(prompt, request_options={"timeout": timeout})
-        time.sleep(1.2) # <--- PAUSA DE SEGURANÇA
         resposta_texto = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(resposta_texto)
     except Exception as e:
@@ -263,8 +263,6 @@ if st.button("🚀 Iniciar Análise e Padronização"):
             status_text.success("Processamento completo!")
             
             leads_df_display = leads_df.astype(str)
-            
-            # Removido para evitar erro com arquivos grandes
             # st.dataframe(leads_df_display)
             
             csv = leads_df.to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
