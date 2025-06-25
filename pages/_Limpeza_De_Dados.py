@@ -43,6 +43,7 @@ def carregar_dados_ibge():
 
 MAPA_CIDADES, MAPA_ESTADOS = carregar_dados_ibge()
 
+
 # --- DEMAIS FUNÇÕES DE PADRONIZAÇÃO ---
 
 def ler_csv_flexivel(arquivo_upado):
@@ -60,6 +61,8 @@ def ler_csv_flexivel(arquivo_upado):
 
 def title_case_com_excecoes(s, excecoes):
     palavras = str(s).split()
+    if not palavras:
+        return ""
     resultado = [palavras[0].capitalize()]
     for palavra in palavras[1:]:
         if palavra.lower() in excecoes:
@@ -71,12 +74,16 @@ def title_case_com_excecoes(s, excecoes):
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if 'first name' in col.lower() or 'nome_lead' in col.lower()), None)
     sobrenome_col = next((col for col in df_columns if 'last name' in col.lower() or 'sobrenome_lead' in col.lower()), None)
+    
     if not nome_col or pd.isna(row.get(nome_col)): return ''
+    
     primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
+    
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
+    
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
 
@@ -87,6 +94,21 @@ def padronizar_nome_empresa(nome_empresa):
     for sigla in siglas:
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
+
+def padronizar_localidade_geral(valor, tipo):
+    if pd.isna(valor): return ''
+    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
+    
+    chave_busca = normalizar_texto_para_comparacao(str(valor))
+    
+    if tipo == 'cidade':
+        return MAPA_CIDADES.get(chave_busca, title_case_com_excecoes(str(valor), ['de', 'da', 'do', 'dos', 'das']))
+    elif tipo == 'estado':
+        chave_busca_estado = re.sub(r'state of ', '', chave_busca).strip()
+        return MAPA_ESTADOS.get(chave_busca_estado, title_case_com_excecoes(str(valor), ['de', 'do']))
+    elif tipo == 'pais':
+        return mapa_paises.get(chave_busca, str(valor).capitalize())
+    return valor
 
 def padronizar_site(site):
     if pd.isna(site) or str(site).strip() == '': return ''
@@ -107,20 +129,6 @@ def padronizar_telefone(telefone):
     if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     return ''
-
-def padronizar_localidade_geral(valor, tipo):
-    if pd.isna(valor): return ''
-    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
-    chave_busca = normalizar_texto_para_comparacao(str(valor))
-    
-    if tipo == 'cidade':
-        return MAPA_CIDADES.get(chave_busca, title_case_com_excecoes(str(valor), ['de', 'da', 'do', 'dos', 'das']))
-    elif tipo == 'estado':
-        chave_busca = re.sub(r'state of ', '', chave_busca).strip()
-        return MAPA_ESTADOS.get(chave_busca, title_case_com_excecoes(str(valor), ['de', 'do']))
-    elif tipo == 'pais':
-        return mapa_paises.get(chave_busca, str(valor).capitalize())
-    return valor
 
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
@@ -172,7 +180,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 cols_ordenadas = ['Nome_Completo'] + [col for col in colunas_finais if col not in ['Nome_Lead', 'Sobrenome_Lead']]
                 df_limpo = df_limpo[cols_ordenadas]
 
-                df_limpo.fillna('', inplace=True)
+                df_limpo = df_limpo.fillna('')
                 for col in df_limpo.columns:
                     df_limpo[col] = df_limpo[col].astype(str).replace('nan', '')
 
