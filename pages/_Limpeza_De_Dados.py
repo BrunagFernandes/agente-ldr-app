@@ -1,9 +1,23 @@
-# --- ESTAÇÃO 1: LIMPEZA E PADRONIZAÇÃO DE DADOS (VERSÃO FINAL CORRIGIDA) ---
+# --- ESTAÇÃO 1: LIMPEZA E PADRONIZAÇÃO DE DADOS (VERSÃO COM BIBLIOTECA DE CIDADES) ---
 import streamlit as st
 import pandas as pd
 import io
 import re
 import unicodedata
+import municipios # <-- Nova biblioteca importada
+
+# --- CARREGAMENTO DOS DADOS DE MUNICÍPIOS (FEITO UMA SÓ VEZ) ---
+try:
+    LISTA_MUNICIPIOS = municipios.get_list_of_all_cities()
+    # Cria um mapa de busca otimizado: {'saopaulo': 'São Paulo', 'jundiai': 'Jundiaí'}
+    MAPA_CIDADES_NORMALIZADO = {
+        ''.join(c for c in unicodedata.normalize('NFD', m['nome']).lower() if unicodedata.category(c) != 'Mn'): m['nome']
+        for m in LISTA_MUNICIPIOS
+    }
+except Exception as e:
+    st.error(f"Não foi possível carregar a lista de municípios: {e}")
+    MAPA_CIDADES_NORMALIZADO = {}
+
 
 # --- FUNÇÕES DE APOIO E PADRONIZAÇÃO ---
 
@@ -11,9 +25,7 @@ def ler_csv_flexivel(arquivo_upado):
     """Lê um arquivo CSV do Apollo, tentando diferentes separadores."""
     try:
         arquivo_upado.seek(0)
-        # Prioriza vírgula, que é o padrão de exportação mais comum
         df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip', low_memory=False)
-        # Se a leitura com vírgula resultou em apenas uma coluna, algo pode estar errado, tenta ponto e vírgula
         if df.shape[1] <= 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip', low_memory=False)
@@ -38,10 +50,7 @@ def normalizar_texto_para_comparacao(texto):
     """Remove acentos e converte para minúsculo para comparações internas."""
     if pd.isna(texto): return ""
     s = str(texto).lower().strip()
-    # Remove o prefixo "State of " se existir
-    s = re.sub(r'state of ', '', s)
-    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-    return s
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 def padronizar_nome_contato(row, df_columns):
     """Cria um nome completo com o primeiro nome e o último sobrenome."""
@@ -69,32 +78,6 @@ def padronizar_nome_empresa(nome_empresa):
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
 
-def padronizar_localidade_geral(valor, tipo):
-    """Padroniza Cidades, Estados e Países, mantendo acentos."""
-    if pd.isna(valor): return ''
-    mapa_estados = {
-        'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 
-        'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 
-        'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 
-        'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 
-        'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 
-        'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 
-        'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 
-        'sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins',
-        'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
-    }
-    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
-    
-    texto_norm = normalizar_texto_para_comparacao(str(valor))
-    
-    if tipo == 'cidade':
-        return title_case_com_excecoes(str(valor).strip(), ['de', 'da', 'do', 'dos', 'das'])
-    elif tipo == 'estado':
-        return mapa_estados.get(texto_norm, title_case_com_excecoes(str(valor), ['de', 'do']))
-    elif tipo == 'pais':
-        return mapa_paises.get(texto_norm, str(valor).capitalize())
-    return valor
-
 def padronizar_site(site):
     if pd.isna(site) or str(site).strip() == '': return ''
     site_limpo = str(site).strip()
@@ -115,9 +98,37 @@ def padronizar_telefone(telefone):
     elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     return ''
 
-# --- INTERFACE DA ESTAÇÃO 1 ---
-st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
+# --- FUNÇÃO DE LOCALIDADE ATUALIZADA PARA USAR A BIBLIOTECA ---
+def padronizar_localidade_geral(valor, tipo):
+    if pd.isna(valor): return ''
+    
+    mapa_estados = {
+        'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 
+        'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 
+        'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 
+        'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 
+        'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 
+        'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 
+        'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 
+        'sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins',
+        'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
+    }
+    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
+    
+    texto_norm = normalizar_texto_para_comparacao(str(valor))
+    
+    if tipo == 'cidade':
+        # Procura a cidade normalizada no nosso mapa e retorna o nome oficial com acento
+        return MAPA_CIDADES_NORMALIZADO.get(texto_norm, title_case_com_excecoes(str(valor), ['de', 'da', 'do', 'dos', 'das']))
+    elif tipo == 'estado':
+        estado_sem_prefixo = re.sub(r'state of ', '', str(valor).lower()).strip()
+        estado_norm_sem_prefixo = normalizar_texto_para_comparacao(estado_sem_prefixo)
+        return mapa_estados.get(estado_norm_sem_prefixo, title_case_com_excecoes(str(valor), ['de', 'do']))
+    elif tipo == 'pais':
+        return mapa_paises.get(texto_norm, str(valor).capitalize())
+    return valor
 
+# --- INTERFACE DA ESTAÇÃO 1 ---
 st.title("⚙️ Estação 1: Limpeza e Preparação de Dados")
 st.write("Faça o upload do seu arquivo de leads (exportado do Apollo ou similar) para limpá-lo e padronizá-lo.")
 
@@ -129,8 +140,6 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
             df = ler_csv_flexivel(uploaded_file)
             
             if df is not None:
-                st.success("Arquivo lido com sucesso!")
-                
                 # ETAPA 1: Seleção e Mapeamento de Colunas
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
@@ -147,12 +156,12 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 
                 colunas_finais = list(colunas_para_renomear.values())
                 df_limpo = df_limpo[colunas_finais].copy()
-
+                
                 # ETAPA 2: Padronização e Reestruturação
                 df_cols = list(df_limpo.columns)
                 df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
-                col_map_padronizacao = {
+                colunas_para_padronizar = {
                     'Nome_Empresa': padronizar_nome_empresa,
                     'Site_Original': padronizar_site,
                     'Telefone_Original': padronizar_telefone,
@@ -164,7 +173,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                     'Pais_Empresa': lambda x: padronizar_localidade_geral(x, 'pais'),
                 }
                 
-                for col, func in col_map_padronizacao.items():
+                for col, func in colunas_para_padronizar.items():
                     if col in df_limpo.columns:
                         df_limpo[col] = df_limpo[col].astype(str).apply(func)
                 
@@ -173,7 +182,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 df_limpo = df_limpo[cols_ordenadas]
 
                 # ETAPA 3: Limpeza Final
-                df_limpo.fillna('', inplace=True)
+                df_limpo = df_limpo.fillna('')
                 df_limpo = df_limpo.astype(str).replace('nan', '')
 
                 st.success("Arquivo limpo e padronizado com sucesso!")
@@ -199,3 +208,4 @@ if 'df_limpo' in st.session_state:
     with col2:
         if st.button("➡️ Enviar para Análise (Estação 2)", use_container_width=True):
             st.switch_page("pages/2_Analise_de_ICP.py")
+
