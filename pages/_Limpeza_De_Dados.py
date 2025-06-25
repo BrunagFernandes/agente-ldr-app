@@ -146,7 +146,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
             if df is not None:
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
-                    'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Phone': 'Telefone_Original',
+                    'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Corporate Phone': 'Telefone_Original',
                     'Industry': 'Segmento_Original', 'City': 'Cidade_Contato', 'State': 'Estado_Contato', 
                     'Country': 'Pais_Contato', 'Company City': 'Cidade_Empresa', 'Company State': 'Estado_Empresa',
                     'Company Country': 'Pais_Empresa', 'Website': 'Site_Original', 'Employees': 'Numero_Funcionarios',
@@ -208,4 +208,3 @@ if 'df_limpo' in st.session_state:
     with col2:
         if st.button("➡️ Enviar para Análise (Estação 2)", use_container_width=True):
             st.switch_page("pages/2_Analise_de_ICP.py")
-
