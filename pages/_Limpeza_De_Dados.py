@@ -26,15 +26,20 @@ def carregar_dados_ibge():
         
         mapa_cidades = {
             normalizar_texto_para_comparacao(m['nome']): m['nome']
-            for m in municipios_json
+            for m in municipios_json if 'nome' in m
         }
         
-        mapa_estados = {
-            m['microrregiao']['mesorregiao']['UF']['sigla'].lower(): m['microrregiao']['mesorregiao']['UF']['nome']
-            for m in municipios_json
-        }
-        for sigla, nome_completo in list(mapa_estados.items()):
-             mapa_estados[normalizar_texto_para_comparacao(nome_completo)] = nome_completo
+        mapa_estados = {}
+        for m in municipios_json:
+            try:
+                # Acesso seguro aos dados aninhados
+                uf_data = m['microrregiao']['mesorregiao']['UF']
+                sigla = uf_data['sigla'].lower()
+                nome = uf_data['nome']
+                mapa_estados[sigla] = nome
+                mapa_estados[normalizar_texto_para_comparacao(nome)] = nome
+            except (KeyError, TypeError):
+                continue # Ignora entradas malformadas na API do IBGE
 
         return mapa_cidades, mapa_estados
     except Exception as e:
@@ -74,16 +79,12 @@ def title_case_com_excecoes(s, excecoes):
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if 'first name' in col.lower() or 'nome_lead' in col.lower()), None)
     sobrenome_col = next((col for col in df_columns if 'last name' in col.lower() or 'sobrenome_lead' in col.lower()), None)
-    
     if not nome_col or pd.isna(row.get(nome_col)): return ''
-    
     primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
-    
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
-    
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
 
@@ -160,7 +161,8 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 df_limpo = df_limpo[colunas_finais].copy()
 
                 df_cols = list(df_limpo.columns)
-                df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
+                if 'Nome_Lead' in df_cols and 'Sobrenome_Lead' in df_cols:
+                    df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
                 colunas_para_padronizar = {
                     'Nome_Empresa': padronizar_nome_empresa, 'Site_Original': padronizar_site,
@@ -180,7 +182,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 cols_ordenadas = ['Nome_Completo'] + [col for col in colunas_finais if col not in ['Nome_Lead', 'Sobrenome_Lead']]
                 df_limpo = df_limpo[cols_ordenadas]
 
-                df_limpo = df_limpo.fillna('')
+                df_limpo.fillna('', inplace=True)
                 for col in df_limpo.columns:
                     df_limpo[col] = df_limpo[col].astype(str).replace('nan', '')
 
@@ -206,3 +208,4 @@ if 'df_limpo' in st.session_state:
     with col2:
         if st.button("➡️ Enviar para Análise (Estação 2)", use_container_width=True):
             st.switch_page("pages/2_Analise_de_ICP.py")
+
