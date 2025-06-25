@@ -38,7 +38,10 @@ def normalizar_texto_para_comparacao(texto):
     """Remove acentos e converte para minúsculo para comparações internas."""
     if pd.isna(texto): return ""
     s = str(texto).lower().strip()
-    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    # Remove o prefixo "State of " se existir
+    s = re.sub(r'state of ', '', s)
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    return s
 
 def padronizar_nome_contato(row, df_columns):
     """Cria um nome completo com o primeiro nome e o último sobrenome."""
@@ -67,9 +70,8 @@ def padronizar_nome_empresa(nome_empresa):
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
 
 def padronizar_localidade_geral(valor, tipo):
-    """Padroniza Cidades, Estados e Países, expandindo siglas e mantendo acentos."""
+    """Padroniza Cidades, Estados e Países, mantendo acentos."""
     if pd.isna(valor): return ''
-    
     mapa_estados = {
         'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 
         'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 
@@ -78,8 +80,7 @@ def padronizar_localidade_geral(valor, tipo):
         'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 
         'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 
         'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 
-        'sao paulo': 'São Paulo', 'state of sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins',
-        # Adicionando siglas
+        'sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins',
         'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
     }
     mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
@@ -89,9 +90,7 @@ def padronizar_localidade_geral(valor, tipo):
     if tipo == 'cidade':
         return title_case_com_excecoes(str(valor).strip(), ['de', 'da', 'do', 'dos', 'das'])
     elif tipo == 'estado':
-        estado_sem_prefixo = re.sub(r'state of ', '', str(valor).lower()).strip()
-        estado_norm_sem_prefixo = normalizar_texto_para_comparacao(estado_sem_prefixo)
-        return mapa_estados.get(estado_norm_sem_prefixo, title_case_com_excecoes(str(valor), ['de', 'do']))
+        return mapa_estados.get(texto_norm, title_case_com_excecoes(str(valor), ['de', 'do']))
     elif tipo == 'pais':
         return mapa_paises.get(texto_norm, str(valor).capitalize())
     return valor
@@ -130,6 +129,8 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
             df = ler_csv_flexivel(uploaded_file)
             
             if df is not None:
+                st.success("Arquivo lido com sucesso!")
+                
                 # ETAPA 1: Seleção e Mapeamento de Colunas
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
@@ -151,7 +152,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 df_cols = list(df_limpo.columns)
                 df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
-                colunas_para_padronizar = {
+                col_map_padronizacao = {
                     'Nome_Empresa': padronizar_nome_empresa,
                     'Site_Original': padronizar_site,
                     'Telefone_Original': padronizar_telefone,
@@ -163,7 +164,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                     'Pais_Empresa': lambda x: padronizar_localidade_geral(x, 'pais'),
                 }
                 
-                for col, func in colunas_para_padronizar.items():
+                for col, func in col_map_padronizacao.items():
                     if col in df_limpo.columns:
                         df_limpo[col] = df_limpo[col].astype(str).apply(func)
                 
