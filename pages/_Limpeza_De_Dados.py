@@ -1,15 +1,13 @@
-# pages/1_Limpeza_de_Dados.py
+# --- ESTAÇÃO 1: LIMPEZA E PADRONIZAÇÃO DE DADOS (VERSÃO COMPLETA) ---
 import streamlit as st
 import pandas as pd
 import io
 import re
 import unicodedata
 
-st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
-
-# --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
-
+# --- FUNÇÃO DE LEITURA DO ARQUIVO ---
 def ler_csv_flexivel(arquivo_upado):
+    """Lê um arquivo CSV do Apollo, tentando diferentes separadores."""
     try:
         arquivo_upado.seek(0)
         df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip', low_memory=False)
@@ -19,9 +17,10 @@ def ler_csv_flexivel(arquivo_upado):
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo CSV: {e}")
+        st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
+# --- FUNÇÕES DE PADRONIZAÇÃO ---
 def title_case_com_excecoes(s, excecoes):
     palavras = str(s).split()
     resultado = []
@@ -35,7 +34,7 @@ def title_case_com_excecoes(s, excecoes):
 def padronizar_nome_contato(row, df_columns):
     nome_col = next((col for col in df_columns if col.strip().lower() in ['first name', 'nome_lead']), None)
     sobrenome_col = next((col for col in df_columns if col.strip().lower() in ['last name', 'sobrenome_lead']), None)
-    if not nome_col or pd.isna(row[nome_col]): return ''
+    if not nome_col or pd.isna(row.get(nome_col)): return ''
     primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
@@ -52,15 +51,36 @@ def padronizar_nome_empresa(nome_empresa):
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
 
+def padronizar_site(site):
+    if pd.isna(site) or str(site).strip() == '': return ''
+    site_limpo = str(site).strip()
+    site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
+    site_limpo = site_limpo.rstrip('/')
+    if not site_limpo.lower().startswith('www.'):
+        site_limpo = 'www.' + site_limpo
+    return site_limpo
+    
+def padronizar_telefone(telefone):
+    if pd.isna(telefone): return ''
+    apenas_digitos = re.sub(r'\D', '', str(telefone))
+    if apenas_digitos.startswith('0800'): return ''
+    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11: apenas_digitos = apenas_digitos[2:]
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'): apenas_digitos = apenas_digitos[1:]
+    if len(apenas_digitos) not in [10, 11]: return ''
+    if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
+    elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+    return ''
+
 def padronizar_localidade_geral(valor, tipo):
     if pd.isna(valor): return ''
-    mapa_estados = {'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 'sao paulo': 'São Paulo', 'state of sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins'}
+    mapa_estados = {'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 'rio grande do norte': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 'sao paulo': 'São Paulo', 'state of sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins'}
     mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
     
     s_norm = ''.join(c for c in unicodedata.normalize('NFD', str(valor).lower().strip()) if unicodedata.category(c) != 'Mn')
 
     if tipo == 'cidade':
-        return title_case_com_excecoes(str(valor).strip(), ['de', 'da', 'do', 'dos', 'das'])
+        cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
+        return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
     elif tipo == 'estado':
         return mapa_estados.get(s_norm, title_case_com_excecoes(str(valor), ['de', 'do']))
     elif tipo == 'pais':
@@ -68,18 +88,22 @@ def padronizar_localidade_geral(valor, tipo):
     return valor
 
 # --- INTERFACE DA ESTAÇÃO 1 ---
+st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
+
 st.title("⚙️ Estação 1: Limpeza e Preparação de Dados")
 st.write("Faça o upload do seu arquivo de leads (exportado do Apollo ou similar) para limpá-lo e padronizá-lo.")
 
 uploaded_file = st.file_uploader("1. Selecione o arquivo de DADOS brutos (.csv)", type="csv")
 
-if st.button("🧹 Limpar e Padronizar Arquivo"):
+if st.button("🧹 Iniciar Limpeza e Padronização"):
     if uploaded_file is not None:
         with st.spinner('Lendo e processando o arquivo... Por favor, aguarde.'):
             df = ler_csv_flexivel(uploaded_file)
             
             if df is not None:
-                # ETAPA 1: Seleção e Mapeamento de Colunas
+                st.success("Arquivo lido com sucesso!")
+                
+                # Mapeamento e Seleção de Colunas
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
                     'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Phone': 'Telefone_Original',
@@ -88,39 +112,45 @@ if st.button("🧹 Limpar e Padronizar Arquivo"):
                     'Person Linkedin Url': 'Linkedin_Contato', 'Company Linkedin Url': 'LinkedIn_Empresa', 
                     'Facebook Url': 'Facebook_Empresa'
                 }
+                colunas_para_manter_originais = [col for col in mapa_colunas.keys() if col in df.columns]
+                df_limpo = df[colunas_para_manter_originais].copy()
+                df_limpo.rename(columns=mapa_colunas, inplace=True)
                 
-                colunas_para_renomear = {k: v for k, v in mapa_colunas.items() if k in df.columns}
-                df_limpo = df.rename(columns=colunas_para_renomear)
+                # Achatamento
+                df_limpo = df_limpo.astype(str)
                 
-                colunas_finais = [v for k, v in mapa_colunas.items() if k in df.columns]
-                df_limpo = df_limpo[colunas_finais].copy()
-                
-                # ETAPA 2: Padronização e Reestruturação
+                # Padronização e Reestruturação
                 df_cols = list(df_limpo.columns)
-
                 df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
-                df_limpo.drop(columns=['Nome_Lead', 'Sobrenome_Lead'], inplace=True, errors='ignore')
-
-                col_map_padronizacao = {
+                
+                colunas_para_padronizar = {
                     'Nome_Empresa': padronizar_nome_empresa,
+                    'Site_Original': padronizar_site,
+                    'Telefone_Original': padronizar_telefone,
                     'Cidade_Empresa': lambda x: padronizar_localidade_geral(x, 'cidade'),
                     'Estado_Empresa': lambda x: padronizar_localidade_geral(x, 'estado'),
                     'Pais_Empresa': lambda x: padronizar_localidade_geral(x, 'pais'),
                 }
-
-                for col, func in col_map_padronizacao.items():
+                
+                for col, func in colunas_para_padronizar.items():
                     if col in df_limpo.columns:
-                        df_limpo[col] = df_limpo[col].astype(str).apply(func)
+                        df_limpo[col] = df_limpo[col].apply(func)
+
+                # Reordenar e remover colunas antigas
+                colunas_finais = ['Nome_Completo'] + [v for k, v in mapa_colunas.items() if k in colunas_para_manter_originais and v not in ['Nome_Lead', 'Sobrenome_Lead']]
+                df_limpo = df_limpo[colunas_finais]
 
                 st.success("Arquivo limpo e padronizado com sucesso!")
                 st.dataframe(df_limpo.head(10))
 
                 st.session_state['df_limpo'] = df_limpo
+    else:
+        st.warning("Por favor, faça o upload de um arquivo para começar.")
 
 # --- BOTÕES DE AÇÃO PÓS-LIMPEZA ---
 if 'df_limpo' in st.session_state:
     st.write("---")
-    
+    st.header("Próximo Passo")
     col1, col2 = st.columns(2)
     
     with col1:
