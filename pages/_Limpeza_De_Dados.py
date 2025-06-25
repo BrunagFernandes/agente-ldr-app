@@ -4,48 +4,16 @@ import pandas as pd
 import io
 import re
 import unicodedata
-import requests
-
-# --- CARREGAMENTO DOS DADOS DE MUNICÍPIOS (FEITO UMA SÓ VEZ) ---
-@st.cache_data
-def carregar_dados_ibge():
-    """Carrega e prepara mapas otimizados de cidades e estados da API do IBGE."""
-    try:
-        url_estados = "https://servicodados.ibge.gov.br/api/v1/localidades/estados"
-        response_estados = requests.get(url_estados)
-        response_estados.raise_for_status()
-        estados_json = response_estados.json()
-
-        mapa_estados = {}
-        for estado in estados_json:
-            nome_normalizado = normalizar_texto_para_comparacao(estado['nome'])
-            sigla_normalizada = estado['sigla'].lower()
-            mapa_estados[nome_normalizado] = estado['nome']
-            mapa_estados[sigla_normalizada] = estado['nome']
-
-        url_municipios = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
-        response_municipios = requests.get(url_municipios)
-        response_municipios.raise_for_status()
-        municipios_json = response_municipios.json()
-        
-        mapa_cidades = {
-            normalizar_texto_para_comparacao(m['nome']): m['nome']
-            for m in municipios_json
-        }
-        return mapa_cidades, mapa_estados
-    except Exception as e:
-        st.error(f"Não foi possível carregar a lista de localidades do IBGE: {e}")
-        return {}, {}
-
-MAPA_CIDADES, MAPA_ESTADOS = carregar_dados_ibge()
-
 
 # --- FUNÇÕES DE APOIO E PADRONIZAÇÃO ---
 
 def ler_csv_flexivel(arquivo_upado):
+    """Lê um arquivo CSV do Apollo, tentando diferentes separadores."""
     try:
         arquivo_upado.seek(0)
+        # Prioriza vírgula, que é o padrão de exportação mais comum
         df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip', low_memory=False)
+        # Se a leitura com vírgula resultar em apenas uma coluna, algo pode estar errado, tenta ponto e vírgula
         if df.shape[1] <= 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip', low_memory=False)
@@ -55,40 +23,79 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-def title_case_com_excecoes(s, excecoes):
-    palavras = str(s).split()
-    resultado = [palavras[0].capitalize()]
-    for palavra in palavras[1:]:
-        if palavra.lower() in excecoes:
-            resultado.append(palavra.lower())
-        else:
-            resultado.append(palavra.capitalize())
-    return ' '.join(resultado)
-
 def normalizar_texto_para_comparacao(texto):
+    """Remove acentos e converte para minúsculo para comparações internas."""
     if pd.isna(texto): return ""
     s = str(texto).lower().strip()
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
+def title_case_com_excecoes(s, excecoes):
+    """Aplica capitalização inteligente, mantendo conectivos em minúsculo."""
+    palavras = str(s).split()
+    resultado = []
+    if palavras:
+        resultado.append(palavras[0].capitalize())
+        for palavra in palavras[1:]:
+            if palavra.lower() in excecoes:
+                resultado.append(palavra.lower())
+            else:
+                resultado.append(palavra.capitalize())
+    return ' '.join(resultado)
+
 def padronizar_nome_contato(row, df_columns):
+    """Cria um nome completo com o primeiro nome e o último sobrenome."""
     nome_col = next((col for col in df_columns if 'first name' in col.lower() or 'nome_lead' in col.lower()), None)
     sobrenome_col = next((col for col in df_columns if 'last name' in col.lower() or 'sobrenome_lead' in col.lower()), None)
+    
     if not nome_col or pd.isna(row.get(nome_col)): return ''
+    
     primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
+    
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
+    
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
 
 def padronizar_nome_empresa(nome_empresa):
+    """Remove siglas e formata o nome da empresa."""
     if pd.isna(nome_empresa): return ''
     nome_limpo = str(nome_empresa)
     siglas = [r'\sS/A', r'\sS\.A', r'\sSA\b', r'\sLTDA', r'\sLtda', r'\sME\b', r'\sEIRELI', r'\sEPP', r'\sMEI\b']
     for sigla in siglas:
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
+
+def padronizar_localidade_geral(valor, tipo):
+    """Padroniza Cidades, Estados e Países, mantendo acentos e expandindo siglas."""
+    if pd.isna(valor): return ''
+    
+    mapa_estados = {
+        'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 
+        'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 
+        'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 
+        'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 
+        'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 
+        'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 
+        'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 
+        'sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins',
+        'ac': 'Acre', 'al': 'Alagoas', 'ap': 'Amapá', 'am': 'Amazonas', 'ba': 'Bahia', 'ce': 'Ceará', 'df': 'Distrito Federal', 'es': 'Espírito Santo', 'go': 'Goiás', 'ma': 'Maranhão', 'mt': 'Mato Grosso', 'ms': 'Mato Grosso do Sul', 'mg': 'Minas Gerais', 'pa': 'Pará', 'pb': 'Paraíba', 'pr': 'Paraná', 'pe': 'Pernambuco', 'pi': 'Piauí', 'rj': 'Rio de Janeiro', 'rn': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'ro': 'Rondônia', 'rr': 'Roraima', 'sc': 'Santa Catarina', 'sp': 'São Paulo', 'se': 'Sergipe', 'to': 'Tocantins'
+    }
+    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
+    
+    texto_para_comparar = normalizar_texto_para_comparacao(str(valor))
+    
+    if tipo == 'cidade':
+        return title_case_com_excecoes(str(valor).strip(), ['de', 'da', 'do', 'dos', 'das'])
+    elif tipo == 'estado':
+        estado_sem_prefixo = re.sub(r'state of ', '', str(valor).lower()).strip()
+        chave_busca = normalizar_texto_para_comparacao(estado_sem_prefixo)
+        return mapa_estados.get(chave_busca, title_case_com_excecoes(str(valor), ['de', 'do']))
+    elif tipo == 'pais':
+        return mapa_paises.get(texto_para_comparar, str(valor).capitalize())
+    return valor
 
 def padronizar_site(site):
     if pd.isna(site) or str(site).strip() == '': return ''
@@ -110,24 +117,8 @@ def padronizar_telefone(telefone):
     elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     return ''
 
-def padronizar_localidade_geral(valor, tipo):
-    if pd.isna(valor): return ''
-    mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
-    
-    chave_busca = normalizar_texto_para_comparacao(str(valor))
-    
-    if tipo == 'cidade':
-        return MAPA_CIDADES.get(chave_busca, title_case_com_excecoes(str(valor), ['de', 'da', 'do', 'dos', 'das']))
-    elif tipo == 'estado':
-        chave_busca_estado = re.sub(r'state of ', '', chave_busca).strip()
-        return MAPA_ESTADOS.get(chave_busca_estado, title_case_com_excecoes(str(valor), ['de', 'do']))
-    elif tipo == 'pais':
-        return mapa_paises.get(chave_busca, str(valor).capitalize())
-    return valor
-
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
-
 st.title("⚙️ Estação 1: Limpeza e Preparação de Dados")
 st.write("Faça o upload do seu arquivo de leads (exportado do Apollo ou similar) para limpá-lo e padronizá-lo.")
 
@@ -139,6 +130,8 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
             df = ler_csv_flexivel(uploaded_file)
             
             if df is not None:
+                st.success("Arquivo lido com sucesso!")
+                
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
                     'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Phone': 'Telefone_Original',
@@ -154,7 +147,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 
                 colunas_finais = list(colunas_para_renomear.values())
                 df_limpo = df_limpo[colunas_finais].copy()
-
+                
                 df_cols = list(df_limpo.columns)
                 df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
@@ -176,7 +169,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 cols_ordenadas = ['Nome_Completo'] + [col for col in colunas_finais if col not in ['Nome_Lead', 'Sobrenome_Lead']]
                 df_limpo = df_limpo[cols_ordenadas]
 
-                df_limpo = df_limpo.fillna('')
+                df_limpo.fillna('', inplace=True)
                 for col in df_limpo.columns:
                     df_limpo[col] = df_limpo[col].astype(str).replace('nan', '')
 
@@ -191,10 +184,14 @@ if 'df_limpo' in st.session_state:
     st.write("---")
     st.header("Próximo Passo")
     col1, col2 = st.columns(2)
+    
     with col1:
         csv = st.session_state['df_limpo'].to_csv(sep=';', index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button(label="⬇️ Baixar CSV Limpo", data=csv, file_name='leads_limpos.csv', mime='text/csv', use_container_width=True)
+        st.download_button(
+            label="⬇️ Baixar CSV Limpo", data=csv, file_name='leads_limpos.csv', 
+            mime='text/csv', use_container_width=True
+        )
+        
     with col2:
         if st.button("➡️ Enviar para Análise (Estação 2)", use_container_width=True):
             st.switch_page("pages/2_Analise_de_ICP.py")
-
