@@ -5,13 +5,16 @@ import io
 import re
 import unicodedata
 
-# --- FUNÇÃO DE LEITURA DO ARQUIVO ---
+# --- FUNÇÕES DE APOIO E PADRONIZAÇÃO ---
+
 def ler_csv_flexivel(arquivo_upado):
     """Lê um arquivo CSV do Apollo, tentando diferentes separadores."""
     try:
         arquivo_upado.seek(0)
+        # Prioriza vírgula, que é o padrão de exportação mais comum
         df = pd.read_csv(arquivo_upado, sep=',', encoding='utf-8', on_bad_lines='skip', low_memory=False)
-        if df.shape[1] == 1:
+        # Se a leitura com vírgula resultar em apenas uma coluna, algo pode estar errado, tenta ponto e vírgula
+        if df.shape[1] <= 1:
             arquivo_upado.seek(0)
             df = pd.read_csv(arquivo_upado, sep=';', encoding='utf-8', on_bad_lines='skip', low_memory=False)
         df.columns = df.columns.str.strip()
@@ -20,8 +23,8 @@ def ler_csv_flexivel(arquivo_upado):
         st.error(f"Erro crítico ao ler o arquivo CSV: {e}")
         return None
 
-# --- FUNÇÕES DE PADRONIZAÇÃO ---
 def title_case_com_excecoes(s, excecoes):
+    """Aplica capitalização inteligente, mantendo conectivos em minúsculo."""
     palavras = str(s).split()
     resultado = []
     for i, palavra in enumerate(palavras):
@@ -31,19 +34,31 @@ def title_case_com_excecoes(s, excecoes):
             resultado.append(palavra.capitalize())
     return ' '.join(resultado)
 
+def normalizar_texto_para_comparacao(texto):
+    """Remove acentos e converte para minúsculo para comparações."""
+    if pd.isna(texto): return ""
+    s = str(texto).lower().strip()
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
 def padronizar_nome_contato(row, df_columns):
-    nome_col = next((col for col in df_columns if col.strip().lower() in ['first name', 'nome_lead']), None)
-    sobrenome_col = next((col for col in df_columns if col.strip().lower() in ['last name', 'sobrenome_lead']), None)
+    """Cria um nome completo com o primeiro nome e o último sobrenome."""
+    nome_col = next((col for col in df_columns if 'first name' in col.lower() or 'nome_lead' in col.lower()), None)
+    sobrenome_col = next((col for col in df_columns if 'last name' in col.lower() or 'sobrenome_lead' in col.lower()), None)
+    
     if not nome_col or pd.isna(row.get(nome_col)): return ''
+    
     primeiro_nome = str(row[nome_col]).split()[0]
     sobrenome_completo = str(row.get(sobrenome_col, ''))
     conectivos = ['de', 'da', 'do', 'dos', 'das']
     partes_sobrenome = [p for p in sobrenome_completo.split() if p.lower() not in conectivos]
+    
     ultimo_sobrenome = partes_sobrenome[-1] if partes_sobrenome else ''
+    
     nome_final = f"{primeiro_nome} {ultimo_sobrenome}".strip()
     return nome_final.title()
 
 def padronizar_nome_empresa(nome_empresa):
+    """Remove siglas e formata o nome da empresa."""
     if pd.isna(nome_empresa): return ''
     nome_limpo = str(nome_empresa)
     siglas = [r'\sS/A', r'\sS\.A', r'\sSA\b', r'\sLTDA', r'\sLtda', r'\sME\b', r'\sEIRELI', r'\sEPP', r'\sMEI\b']
@@ -51,38 +66,30 @@ def padronizar_nome_empresa(nome_empresa):
         nome_limpo = re.sub(sigla, '', nome_limpo, flags=re.IGNORECASE)
     return title_case_com_excecoes(nome_limpo.strip(), ['de', 'da', 'do', 'dos', 'das', 'e'])
 
-def padronizar_site(site):
-    if pd.isna(site) or str(site).strip() == '': return ''
-    site_limpo = str(site).strip()
-    site_limpo = re.sub(r'^(https?://)?', '', site_limpo)
-    site_limpo = site_limpo.rstrip('/')
-    if not site_limpo.lower().startswith('www.'):
-        site_limpo = 'www.' + site_limpo
-    return site_limpo
-    
-def padronizar_telefone(telefone):
-    if pd.isna(telefone): return ''
-    apenas_digitos = re.sub(r'\D', '', str(telefone))
-    if apenas_digitos.startswith('0800'): return ''
-    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11: apenas_digitos = apenas_digitos[2:]
-    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'): apenas_digitos = apenas_digitos[1:]
-    if len(apenas_digitos) not in [10, 11]: return ''
-    if len(apenas_digitos) == 11: return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
-    elif len(apenas_digitos) == 10: return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
-    return ''
-
 def padronizar_localidade_geral(valor, tipo):
+    """Padroniza Cidades, Estados e Países, expandindo siglas e traduzindo."""
     if pd.isna(valor): return ''
-    mapa_estados = {'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 'rio grande do norte': 'Rio Grande do Norte', 'rs': 'Rio Grande do Sul', 'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 'sao paulo': 'São Paulo', 'state of sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins'}
+    mapa_estados = {
+        'acre': 'Acre', 'alagoas': 'Alagoas', 'amapa': 'Amapá', 'amazonas': 'Amazonas', 'bahia': 'Bahia', 
+        'ceara': 'Ceará', 'distrito federal': 'Distrito Federal', 'espirito santo': 'Espírito Santo', 
+        'goias': 'Goiás', 'maranhao': 'Maranhão', 'mato grosso': 'Mato Grosso', 'mato grosso do sul': 'Mato Grosso do Sul', 
+        'minas gerais': 'Minas Gerais', 'para': 'Pará', 'paraiba': 'Paraíba', 'parana': 'Paraná', 
+        'pernambuco': 'Pernambuco', 'piaui': 'Piauí', 'rio de janeiro': 'Rio de Janeiro', 
+        'rio grande do norte': 'Rio Grande do Norte', 'rio grande do sul': 'Rio Grande do Sul', 
+        'rondonia': 'Rondônia', 'roraima': 'Roraima', 'santa catarina': 'Santa Catarina', 
+        'sao paulo': 'São Paulo', 'state of sao paulo': 'São Paulo', 'sergipe': 'Sergipe', 'tocantins': 'Tocantins'
+    }
     mapa_paises = { 'br': 'Brasil', 'bra': 'Brasil', 'brazil': 'Brasil' }
     
-    s_norm = ''.join(c for c in unicodedata.normalize('NFD', str(valor).lower().strip()) if unicodedata.category(c) != 'Mn')
+    s_norm = normalizar_texto_para_comparacao(valor)
 
     if tipo == 'cidade':
-        cidade_limpa = re.sub(r'[^a-zA-Z\s]', '', str(valor)).strip()
-        return title_case_com_excecoes(cidade_limpa, ['de', 'da', 'do', 'dos', 'das'])
+        return title_case_com_excecoes(str(valor).strip(), ['de', 'da', 'do', 'dos', 'das'])
     elif tipo == 'estado':
-        return mapa_estados.get(s_norm, title_case_com_excecoes(str(valor), ['de', 'do']))
+        # Remove o prefixo "State of " antes de normalizar e procurar
+        estado_sem_prefixo = re.sub(r'state of ', '', str(valor).lower()).strip()
+        estado_norm_sem_prefixo = normalizar_texto_para_comparacao(estado_sem_prefixo)
+        return mapa_estados.get(estado_norm_sem_prefixo, title_case_com_excecoes(str(valor), ['de', 'do']))
     elif tipo == 'pais':
         return mapa_paises.get(s_norm, str(valor).capitalize())
     return valor
@@ -103,42 +110,48 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
             if df is not None:
                 st.success("Arquivo lido com sucesso!")
                 
-                # Mapeamento e Seleção de Colunas
+                # ETAPA 1: Seleção e Mapeamento de Colunas
                 mapa_colunas = {
                     'First Name': 'Nome_Lead', 'Last Name': 'Sobrenome_Lead', 'Title': 'Cargo', 
                     'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Phone': 'Telefone_Original',
-                    'Industry': 'Segmento_Original', 'City': 'Cidade_Empresa', 'State': 'Estado_Empresa', 
-                    'Country': 'Pais_Empresa', 'Website': 'Site_Original', 'Employees': 'Numero_Funcionarios',
+                    'Industry': 'Segmento_Original', 'City': 'Cidade_Contato', 'State': 'Estado_Contato', 
+                    'Country': 'Pais_Contato', 'Company City': 'Cidade_Empresa', 'Company State': 'Estado_Empresa',
+                    'Company Country': 'Pais_Empresa', 'Website': 'Site_Original', 'Employees': 'Numero_Funcionarios',
                     'Person Linkedin Url': 'Linkedin_Contato', 'Company Linkedin Url': 'LinkedIn_Empresa', 
                     'Facebook Url': 'Facebook_Empresa'
                 }
-                colunas_para_manter_originais = [col for col in mapa_colunas.keys() if col in df.columns]
-                df_limpo = df[colunas_para_manter_originais].copy()
-                df_limpo.rename(columns=mapa_colunas, inplace=True)
                 
-                # Achatamento
-                df_limpo = df_limpo.astype(str)
+                colunas_para_renomear = {k: v for k, v in mapa_colunas.items() if k in df.columns}
+                df_limpo = df.rename(columns=colunas_para_renomear)
                 
-                # Padronização e Reestruturação
+                colunas_finais = list(colunas_para_renomear.values())
+                df_limpo = df_limpo[colunas_finais].copy()
+                
+                # ETAPA 2: Padronização e Reestruturação
                 df_cols = list(df_limpo.columns)
                 df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
-                colunas_para_padronizar = {
+                col_map_padronizacao = {
                     'Nome_Empresa': padronizar_nome_empresa,
-                    'Site_Original': padronizar_site,
-                    'Telefone_Original': padronizar_telefone,
+                    'Cidade_Contato': lambda x: padronizar_localidade_geral(x, 'cidade'),
+                    'Estado_Contato': lambda x: padronizar_localidade_geral(x, 'estado'),
+                    'Pais_Contato': lambda x: padronizar_localidade_geral(x, 'pais'),
                     'Cidade_Empresa': lambda x: padronizar_localidade_geral(x, 'cidade'),
                     'Estado_Empresa': lambda x: padronizar_localidade_geral(x, 'estado'),
                     'Pais_Empresa': lambda x: padronizar_localidade_geral(x, 'pais'),
                 }
                 
-                for col, func in colunas_para_padronizar.items():
+                for col, func in col_map_padronizacao.items():
                     if col in df_limpo.columns:
-                        df_limpo[col] = df_limpo[col].apply(func)
+                        df_limpo[col] = df_limpo[col].astype(str).apply(func)
+                
+                # Reordena colunas e remove as antigas de nome
+                cols_ordenadas = ['Nome_Completo'] + [col for col in colunas_finais if col not in ['Nome_Lead', 'Sobrenome_Lead']]
+                df_limpo = df_limpo[cols_ordenadas]
 
-                # Reordenar e remover colunas antigas
-                colunas_finais = ['Nome_Completo'] + [v for k, v in mapa_colunas.items() if k in colunas_para_manter_originais and v not in ['Nome_Lead', 'Sobrenome_Lead']]
-                df_limpo = df_limpo[colunas_finais]
+                # ETAPA 3: Limpeza Final
+                df_limpo.fillna('', inplace=True)
+                df_limpo = df_limpo.astype(str).replace('nan', '')
 
                 st.success("Arquivo limpo e padronizado com sucesso!")
                 st.dataframe(df_limpo.head(10))
