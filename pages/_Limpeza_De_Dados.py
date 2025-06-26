@@ -125,33 +125,38 @@ def padronizar_telefone(telefone):
     if pd.isna(telefone):
         return ''
     
-    # 1. Limpa o número, mantendo apenas os dígitos
-    apenas_digitos = re.sub(r'\D', '', str(telefone))
+    tel_str = str(telefone).strip()
     
-    # 2. Normalização: Remove o código do país (55) ANTES de qualquer outra verificação
-    if apenas_digitos.startswith('55') and len(apenas_digitos) > 11:
+    # 1. Verificação inicial por padrões a serem removidos
+    if '0800' in tel_str:
+        return ''
+    # Se começa com '+' mas não é '+55', é internacional
+    if tel_str.startswith('+') and not tel_str.startswith('+55'):
+        return ''
+
+    # 2. Limpa o número, mantendo apenas os dígitos
+    apenas_digitos = re.sub(r'\D', '', tel_str)
+    
+    # 3. Normalização: Remove o código do país (55) se ele estiver presente
+    if apenas_digitos.startswith('55'):
         apenas_digitos = apenas_digitos[2:]
 
-    # 3. Normalização: Remove o '0' inicial de DDD, se houver
+    # 4. Normalização: Remove o '0' inicial de DDD, se houver
     if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
         apenas_digitos = apenas_digitos[1:]
 
-    # 4. REGRA DE REMOÇÃO 1: Ignora números 0800 (após normalização)
-    if apenas_digitos.startswith('0800'):
-        return ''
-        
-    # 5. REGRA DE REMOÇÃO 2: Se não for um número brasileiro válido (10 ou 11 dígitos), remove
+    # 5. Validação final de tamanho: Se não for um número brasileiro válido, remove
     if len(apenas_digitos) not in [10, 11]:
         return ''
 
-    # 6. Formatação para o padrão brasileiro (só executa se o número for válido)
+    # 6. Formatação para o padrão brasileiro
     if len(apenas_digitos) == 11:  # Celular com 9
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:  # Fixo ou Celular antigo
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     
     return '' # Caso de segurança, retorna vazio se nada acima funcionar
-
+    
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
 st.title("⚙️ Estação 1: Limpeza e Preparação de Dados")
