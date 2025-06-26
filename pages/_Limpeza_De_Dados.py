@@ -121,43 +121,45 @@ def padronizar_site(site):
     return site_limpo
     
 def padronizar_telefone(telefone):
-    """Filtra e formata um número de telefone para o padrão brasileiro, seguindo a lógica de verificação em etapas."""
+    """Filtra e formata um número de telefone para o padrão brasileiro, removendo 0800 e internacionais."""
     if pd.isna(telefone):
         return ''
     
     tel_str = str(telefone).strip()
-
-    # Etapa 1: Verifica se é um número internacional (começa com '+' mas não '+55')
+    
+    # 1. Filtro inicial para números internacionais que começam com '+'
     if tel_str.startswith('+') and not tel_str.startswith('+55'):
         return ''
 
-    # Limpa todos os caracteres não numéricos para a próxima etapa
+    # 2. Limpa o número para ter apenas os dígitos
     apenas_digitos = re.sub(r'\D', '', tel_str)
-
-    # Etapa 2: Se o número original começava com '+55', remove o '55'
-    if tel_str.startswith('+55'):
-        apenas_digitos = apenas_digitos[2:]
     
-    # Etapa 3: Verifica se é 0800
+    # 3. Normalização: Remove o código do país (55) se ele estiver presente no início
+    if apenas_digitos.startswith('55'):
+        apenas_digitos = apenas_digitos[2:]
+
+    # 4. REGRA DE REMOÇÃO 1: Ignora números 0800 (após normalização)
     if apenas_digitos.startswith('0800'):
         return ''
+        
+    # 5. Normalização: Remove o '0' inicial de DDD, se houver
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
+        apenas_digitos = apenas_digitos[1:]
 
-    # Etapa 4: Validação de tamanho e segunda chance para remover o '55'
-    if len(apenas_digitos) > 11:
-        if apenas_digitos.startswith('55'):
-            apenas_digitos = apenas_digitos[2:]
-    
-    # Etapa 5: Verificação final de tamanho
+    # 6. Validação final de tamanho: Se não for um número brasileiro válido, remove
     if len(apenas_digitos) not in [10, 11]:
         return ''
 
-    # Etapa 6: Formatação final para números válidos
+    # 7. Formatação para o padrão brasileiro
     if len(apenas_digitos) == 11:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
+        # Check for 800 one last time, as some systems might omit the leading 0
+        if apenas_digitos.startswith('800'):
+            return ''
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     
-    return '' # Caso de segurança
+    return '' # Caso de segurança, retorna vazio se nada acima funcionar
     
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
