@@ -5,6 +5,7 @@ import io
 import re
 import unicodedata
 import requests # <-- Adicionado para fazer a chamada à API do IBGE
+from dados_traducao import DICIONARIO_SEGMENTOS
 
 # --- FUNÇÃO DE APOIO PARA NORMALIZAÇÃO ---
 def normalizar_texto_para_comparacao(texto):
@@ -119,48 +120,54 @@ def padronizar_site(site):
     if not site_limpo.lower().startswith('www.'):
         site_limpo = 'www.' + site_limpo
     return site_limpo
+
+    def padronizar_segmento(segmento):
+    """Traduz o segmento usando o dicionário interno."""
+    if pd.isna(segmento): return ''
+    # Normaliza o segmento do arquivo para fazer a busca no dicionário
+    segmento_norm = str(segmento).lower().strip()
+    # Retorna a tradução do dicionário, ou o próprio segmento com a primeira letra maiúscula se não encontrar
+    return DICIONARIO_SEGMENTOS.get(segmento_norm, title_case_com_excecoes(segmento, []))
     
 def padronizar_telefone(telefone):
-    """Filtra e formata um número de telefone para o padrão brasileiro, removendo 0800 e internacionais."""
+    """Filtra e formata um número de telefone para o padrão brasileiro, seguindo a lógica de verificação em etapas."""
     if pd.isna(telefone):
         return ''
     
     tel_str = str(telefone).strip()
-    
-    # 1. Filtro inicial para números internacionais que começam com '+'
+
+    # Etapa 1: Verifica se é um número internacional (começa com '+' mas não '+55')
     if tel_str.startswith('+') and not tel_str.startswith('+55'):
         return ''
 
-    # 2. Limpa o número para ter apenas os dígitos
+    # Limpa todos os caracteres não numéricos para a próxima etapa
     apenas_digitos = re.sub(r'\D', '', tel_str)
-    
-    # 3. Normalização: Remove o código do país (55) se ele estiver presente no início
-    if apenas_digitos.startswith('55'):
-        apenas_digitos = apenas_digitos[2:]
 
-    # 4. REGRA DE REMOÇÃO 1: Ignora números 0800 (após normalização)
+    # Etapa 2: Se o número original começava com '+55', remove o '55'
+    if tel_str.startswith('+55'):
+        apenas_digitos = apenas_digitos[2:]
+    
+    # Etapa 3: Verifica se é 0800
     if apenas_digitos.startswith('0800'):
         return ''
-        
-    # 5. Normalização: Remove o '0' inicial de DDD, se houver
-    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
-        apenas_digitos = apenas_digitos[1:]
 
-    # 6. Validação final de tamanho: Se não for um número brasileiro válido, remove
+    # Etapa 4: Validação de tamanho e segunda chance para remover o '55'
+    if len(apenas_digitos) > 11:
+        if apenas_digitos.startswith('55'):
+            apenas_digitos = apenas_digitos[2:]
+    
+    # Etapa 5: Verificação final de tamanho
     if len(apenas_digitos) not in [10, 11]:
         return ''
 
-    # 7. Formatação para o padrão brasileiro
+    # Etapa 6: Formatação final para números válidos
     if len(apenas_digitos) == 11:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
-        # Check for 800 one last time, as some systems might omit the leading 0
-        if apenas_digitos.startswith('800'):
-            return ''
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
     
-    return '' # Caso de segurança, retorna vazio se nada acima funcionar
-    
+    return '' # Caso de segurança
+
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
 st.title("⚙️ Estação 1: Limpeza e Preparação de Dados")
@@ -197,6 +204,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 colunas_para_padronizar = {
                     'Nome_Empresa': padronizar_nome_empresa, 'Site_Original': padronizar_site,
                     'Telefone_Original': padronizar_telefone,
+                    'Segmento_Original': padronizar_segmento, 
                     'Cidade_Contato': lambda x: padronizar_localidade_geral(x, 'cidade'),
                     'Estado_Contato': lambda x: padronizar_localidade_geral(x, 'estado'),
                     'Pais_Contato': lambda x: padronizar_localidade_geral(x, 'pais'),
