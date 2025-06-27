@@ -158,6 +158,8 @@ def padronizar_telefone(telefone):
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+        
+    return '' 
 
 def padronizar_segmento(segmento):
     """Traduz o segmento usando o dicionário interno."""
