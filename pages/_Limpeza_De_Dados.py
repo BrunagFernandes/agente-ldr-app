@@ -199,6 +199,9 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 df_cols = list(df_limpo.columns)
                 if 'Nome_Lead' in df_cols and 'Sobrenome_Lead' in df_cols:
                     df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
+                    # --- ALTERAÇÃO REALIZADA AQUI ---
+                    # Adicionado para remover as colunas originais após criar a Nome_Completo
+                    df_limpo = df_limpo.drop(columns=['Nome_Lead', 'Sobrenome_Lead'])
                 
                 colunas_para_padronizar = {
                     'Nome_Empresa': padronizar_nome_empresa, 
