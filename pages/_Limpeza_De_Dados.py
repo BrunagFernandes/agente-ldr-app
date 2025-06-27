@@ -185,7 +185,7 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                     'Company': 'Nome_Empresa', 'Email': 'Email_Lead', 'Corporate Phone': 'Telefone_Original',
                     'Industry': 'Segmento_Original', 'City': 'Cidade_Contato', 'State': 'Estado_Contato', 
                     'Country': 'Pais_Contato', 'Company City': 'Cidade_Empresa', 'Company State': 'Estado_Empresa',
-                    'Company Country': 'Pais_Empresa', 'Website': 'Site_Original', 'Employees': 'Numero_Funcionarios',
+                    'Company Country': 'Pais_Empresa', 'Website': 'Site_Original', '# Employees': 'Numero_Funcionarios',
                     'Person Linkedin Url': 'Linkedin_Contato', 'Company Linkedin Url': 'LinkedIn_Empresa', 
                     'Facebook Url': 'Facebook_Empresa'
                 }
