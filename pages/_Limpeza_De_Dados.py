@@ -121,7 +121,7 @@ def padronizar_site(site):
         site_limpo = 'www.' + site_limpo
     return site_limpo
 
-    def padronizar_segmento(segmento):
+def padronizar_segmento(segmento):
     """Traduz o segmento usando o dicionário interno."""
     if pd.isna(segmento): return ''
     # Normaliza o segmento do arquivo para fazer a busca no dicionário
