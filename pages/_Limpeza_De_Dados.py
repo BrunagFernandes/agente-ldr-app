@@ -217,17 +217,22 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                     if col in df_limpo.columns:
                         df_limpo[col] = df_limpo[col].astype(str).apply(func)
                 
-                # Reordenar colunas
-                colunas_ordenadas_iniciais = ['Nome_Completo', 'Cargo', 'Email_Lead', 'Telefone_Original', 'Linkedin_Contato']
-                outras_colunas = [
-                    col for col in df_limpo.columns 
-                    if col not in colunas_ordenadas_iniciais and col not in ['Nome_Lead', 'Sobrenome_Lead']
+                # Reordenar colunas para a sequência final desejada
+                ordem_final_desejada = [
+                    'Nome_Completo', 'Cargo', 'Email_Lead', 'Nome_Empresa', 'Site_Original',
+                    'Telefone_Original', 'Cidade_Contato', 'Estado_Contato', 'Pais_Contato',
+                    'Segmento_Original', 'Cidade_Empresa', 'Estado_Empresa', 'Pais_Empresa',
+                    'Numero_Funcionarios', 'Linkedin_Contato', 'LinkedIn_Empresa', 'Facebook_Empresa'
                 ]
-                
-                # Garante que as colunas a ordenar existam no dataframe
-                colunas_ordenadas_finais = [col for col in colunas_ordenadas_iniciais if col in df_limpo.columns] + outras_colunas
-                df_limpo = df_limpo[colunas_ordenadas_finais]
 
+                # Filtra a lista de ordem para conter apenas as colunas que realmente existem no DataFrame
+                colunas_existentes_na_ordem = [col for col in ordem_final_desejada if col in df_limpo.columns]
+                
+                # Pega quaisquer outras colunas que não foram especificadas para não perdê-las
+                outras_colunas = [col for col in df_limpo.columns if col not in colunas_existentes_na_ordem]
+
+                # Aplica a ordem final
+                df_limpo = df_limpo[colunas_existentes_na_ordem + outras_colunas]
                 df_limpo.fillna('', inplace=True)
                 for col in df_limpo.columns:
                     df_limpo[col] = df_limpo[col].astype(str).replace('nan', '')
