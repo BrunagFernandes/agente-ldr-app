@@ -121,13 +121,6 @@ def padronizar_site(site):
         site_limpo = 'www.' + site_limpo
     return site_limpo
 
-def padronizar_segmento(segmento):
-    """Traduz o segmento usando o dicionário interno."""
-    if pd.isna(segmento): return ''
-    # Normaliza o segmento do arquivo para fazer a busca no dicionário
-    segmento_norm = str(segmento).lower().strip()
-    # Retorna a tradução do dicionário, ou o próprio segmento com a primeira letra maiúscula se não encontrar
-    return DICIONARIO_SEGMENTOS.get(segmento_norm, title_case_com_excecoes(segmento, []))
     
 def padronizar_telefone(telefone):
     """Filtra e formata um número de telefone para o padrão brasileiro, seguindo a lógica de verificação em etapas."""
@@ -165,6 +158,14 @@ def padronizar_telefone(telefone):
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
+
+def padronizar_segmento(segmento):
+    """Traduz o segmento usando o dicionário interno."""
+    if pd.isna(segmento): return ''
+    # Normaliza o segmento do arquivo para fazer a busca no dicionário
+    segmento_norm = str(segmento).lower().strip()
+    # Retorna a tradução do dicionário, ou o próprio segmento com a primeira letra maiúscula se não encontrar
+    return DICIONARIO_SEGMENTOS.get(segmento_norm, title_case_com_excecoes(segmento, []))
     
     return '' # Caso de segurança
 
