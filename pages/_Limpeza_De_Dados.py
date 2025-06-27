@@ -1,10 +1,10 @@
-# --- ESTAÇÃO 1: LIMPEZA E PADRONIZAÇÃO DE DADOS (VERSÃO FINAL CORRIGIDA) ---
+# --- ESTAÇÃO 1: LIMPEZA E PADRONIZAÇÃO DE DADOS (VERSÃO PADRÃO OURO) ---
 import streamlit as st
 import pandas as pd
 import io
 import re
 import unicodedata
-import requests # <-- Adicionado para fazer a chamada à API do IBGE
+import requests
 from dados_traducao import DICIONARIO_SEGMENTOS
 
 # --- FUNÇÃO DE APOIO PARA NORMALIZAÇÃO ---
@@ -33,14 +33,13 @@ def carregar_dados_ibge():
         mapa_estados = {}
         for m in municipios_json:
             try:
-                # Acesso seguro aos dados aninhados
                 uf_data = m['microrregiao']['mesorregiao']['UF']
                 sigla = uf_data['sigla'].lower()
                 nome = uf_data['nome']
                 mapa_estados[sigla] = nome
                 mapa_estados[normalizar_texto_para_comparacao(nome)] = nome
             except (KeyError, TypeError):
-                continue # Ignora entradas malformadas na API do IBGE
+                continue
 
         return mapa_cidades, mapa_estados
     except Exception as e:
@@ -121,55 +120,52 @@ def padronizar_site(site):
         site_limpo = 'www.' + site_limpo
     return site_limpo
 
-    
 def padronizar_telefone(telefone):
-    """Filtra e formata um número de telefone para o padrão brasileiro, seguindo a lógica de verificação em etapas."""
+    """Filtra e formata um número de telefone para o padrão brasileiro, removendo 0800 e internacionais."""
     if pd.isna(telefone):
         return ''
     
     tel_str = str(telefone).strip()
-
-    # Etapa 1: Verifica se é um número internacional (começa com '+' mas não '+55')
+    
+    # 1. Filtro inicial para números internacionais que começam com '+'
     if tel_str.startswith('+') and not tel_str.startswith('+55'):
         return ''
 
-    # Limpa todos os caracteres não numéricos para a próxima etapa
+    # 2. Limpa o número para ter apenas os dígitos
     apenas_digitos = re.sub(r'\D', '', tel_str)
-
-    # Etapa 2: Se o número original começava com '+55', remove o '55'
-    if tel_str.startswith('+55'):
-        apenas_digitos = apenas_digitos[2:]
     
-    # Etapa 3: Verifica se é 0800
+    # 3. Normalização: Remove o código do país (55) se ele estiver presente no início
+    if apenas_digitos.startswith('55'):
+        apenas_digitos = apenas_digitos[2:]
+
+    # 4. REGRA DE REMOÇÃO 1: Ignora números 0800 (após normalização)
     if apenas_digitos.startswith('0800'):
         return ''
+        
+    # 5. Normalização: Remove o '0' inicial de DDD, se houver
+    if len(apenas_digitos) == 11 and apenas_digitos.startswith('0'):
+        apenas_digitos = apenas_digitos[1:]
 
-    # Etapa 4: Validação de tamanho e segunda chance para remover o '55'
-    if len(apenas_digitos) > 11:
-        if apenas_digitos.startswith('55'):
-            apenas_digitos = apenas_digitos[2:]
-    
-    # Etapa 5: Verificação final de tamanho
+    # 6. Validação final de tamanho: Se não for um número brasileiro válido, remove
     if len(apenas_digitos) not in [10, 11]:
         return ''
 
-    # Etapa 6: Formatação final para números válidos
+    # 7. Formatação para o padrão brasileiro
     if len(apenas_digitos) == 11:
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:7]}-{apenas_digitos[7:]}"
     elif len(apenas_digitos) == 10:
+        # Check for 800 one last time, as some systems might omit the leading 0
+        if apenas_digitos.startswith('800'):
+            return ''
         return f"({apenas_digitos[:2]}) {apenas_digitos[2:6]}-{apenas_digitos[6:]}"
-        
-    return '' 
+    
+    return '' # Caso de segurança, retorna vazio se nada acima funcionar
 
 def padronizar_segmento(segmento):
     """Traduz o segmento usando o dicionário interno."""
     if pd.isna(segmento): return ''
-    # Normaliza o segmento do arquivo para fazer a busca no dicionário
     segmento_norm = str(segmento).lower().strip()
-    # Retorna a tradução do dicionário, ou o próprio segmento com a primeira letra maiúscula se não encontrar
     return DICIONARIO_SEGMENTOS.get(segmento_norm, title_case_com_excecoes(segmento, []))
-    
-    return '' # Caso de segurança
 
 # --- INTERFACE DA ESTAÇÃO 1 ---
 st.set_page_config(layout="wide", page_title="Estação 1: Limpeza")
@@ -198,14 +194,15 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                 df_limpo = df.rename(columns=colunas_para_renomear)
                 
                 colunas_finais = list(colunas_para_renomear.values())
-                df_limpo = df_limpo[colunas_finais].copy()
+                df_limpo = df_limpo[[col for col in colunas_finais if col in df_limpo.columns]].copy()
 
                 df_cols = list(df_limpo.columns)
                 if 'Nome_Lead' in df_cols and 'Sobrenome_Lead' in df_cols:
                     df_limpo['Nome_Completo'] = df_limpo.apply(lambda row: padronizar_nome_contato(row, df_cols), axis=1)
                 
                 colunas_para_padronizar = {
-                    'Nome_Empresa': padronizar_nome_empresa, 'Site_Original': padronizar_site,
+                    'Nome_Empresa': padronizar_nome_empresa, 
+                    'Site_Original': padronizar_site,
                     'Telefone_Original': padronizar_telefone,
                     'Segmento_Original': padronizar_segmento, 
                     'Cidade_Contato': lambda x: padronizar_localidade_geral(x, 'cidade'),
@@ -220,8 +217,16 @@ if st.button("🧹 Iniciar Limpeza e Padronização"):
                     if col in df_limpo.columns:
                         df_limpo[col] = df_limpo[col].astype(str).apply(func)
                 
-                cols_ordenadas = ['Nome_Completo'] + [col for col in colunas_finais if col not in ['Nome_Lead', 'Sobrenome_Lead']]
-                df_limpo = df_limpo[cols_ordenadas]
+                # Reordenar colunas
+                colunas_ordenadas_iniciais = ['Nome_Completo', 'Cargo', 'Email_Lead', 'Telefone_Original', 'Linkedin_Contato']
+                outras_colunas = [
+                    col for col in df_limpo.columns 
+                    if col not in colunas_ordenadas_iniciais and col not in ['Nome_Lead', 'Sobrenome_Lead']
+                ]
+                
+                # Garante que as colunas a ordenar existam no dataframe
+                colunas_ordenadas_finais = [col for col in colunas_ordenadas_iniciais if col in df_limpo.columns] + outras_colunas
+                df_limpo = df_limpo[colunas_ordenadas_finais]
 
                 df_limpo.fillna('', inplace=True)
                 for col in df_limpo.columns:
